@@ -1,7 +1,6 @@
 #include "transaction_engine.hpp"
 
 #include <algorithm>
-#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -467,32 +466,6 @@ struct Block {
         lazy = 0;
     }
 
-    void debug_verify_best_hull(const char* phase) const {
-        // Temporary differential diagnostic for the default block-size build.
-        if (kMaxBlockSize != 512U || values.empty() || values.size() > 128U) return;
-        std::vector<WideInt> by_length(values.size(), kNegativeInfinity);
-        for (std::size_t start = 0; start < values.size(); ++start) {
-            WideInt window = 0;
-            for (std::size_t end = start; end < values.size(); ++end) {
-                window += static_cast<WideInt>(values[end]);
-                by_length[end - start] = std::max(by_length[end - start], window);
-            }
-        }
-        Hull oracle;
-        oracle.build(by_length);
-        for (WideInt delta = -3; delta <= 3; ++delta) {
-            if (best_hull.max_plus(delta) != oracle.max_plus(delta)) {
-                std::cerr << "BLOCK PROFILE MISMATCH phase=" << phase
-                          << " size=" << values.size()
-                          << " delta=" << static_cast<long long>(delta)
-                          << " actual=" << static_cast<long long>(best_hull.max_plus(delta))
-                          << " expected=" << static_cast<long long>(oracle.max_plus(delta))
-                          << '\n';
-                return;
-            }
-        }
-    }
-
     void append_best_candidates() {
         // The new best-by-length point set is the convex hull of the previous
         // best hull vertices plus every suffix that ends at the appended item.
@@ -540,9 +513,6 @@ struct Block {
             suffix_hull.append_point(
                 static_cast<std::uint16_t>(old_size + 1U), v);
             append_best_candidates();
-            if (values.size() <= 128U &&
-                (values.size() & (values.size() - 1U)) == 0U)
-                debug_verify_best_hull("append");
             return;
         }
 
@@ -607,7 +577,6 @@ struct Block {
         for (const HullPoint& point : profile.best) {
             best_zero = std::max(best_zero, point.y);
         }
-        debug_verify_best_hull("rebuild");
     }
 };
 }  // namespace

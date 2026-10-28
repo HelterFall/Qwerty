@@ -168,7 +168,8 @@ Slope kth_slope_desc(Tree& a, Tree& b, std::size_t k) {
     }
     return Slope{};
 }
-Wide support_scaled(Tree& t, const Slope& slope, std::size_t* selected = nullptr) {
+Wide support_scaled(Tree& t, const Slope& slope, std::size_t* selected = nullptr,
+                    bool rightmost = true) {
     if (!t) {
         if (selected) *selected = 0;
         return kNegInf;
@@ -180,7 +181,9 @@ Wide support_scaled(Tree& t, const Slope& slope, std::size_t* selected = nullptr
     std::size_t lo = 0, hi = count(t) - 1;
     while (lo < hi) {
         const auto mid = lo + (hi - lo) / 2;
-        if (eval(mid) <= eval(mid + 1)) lo = mid + 1;
+        const Wide here = eval(mid);
+        const Wide next = eval(mid + 1);
+        if (rightmost ? here <= next : here < next) lo = mid + 1;
         else hi = mid;
     }
     if (selected) *selected = lo;
@@ -211,8 +214,8 @@ std::pair<std::size_t, std::size_t> find_disjoint_bridge(Tree& left, Tree& right
         const Slope current = kth_slope_desc(left, right, lo);
         if (bridge_gap(left, right, current) == 0) {
             std::size_t li = 0, ri = 0;
-            support_scaled(left, current, &li);
-            support_scaled(right, current, &ri);
+            support_scaled(left, current, &li, false);
+            support_scaled(right, current, &ri, true);
             return {li, ri};
         }
         if (lo == 0) {
@@ -226,8 +229,8 @@ std::pair<std::size_t, std::size_t> find_disjoint_bridge(Tree& left, Tree& right
         }
     }
     std::size_t li = 0, ri = 0;
-    support_scaled(left, probe, &li);
-    support_scaled(right, probe, &ri);
+    support_scaled(left, probe, &li, false);
+    support_scaled(right, probe, &ri, true);
     return {li, ri};
 }
 

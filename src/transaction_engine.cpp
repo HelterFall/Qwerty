@@ -75,7 +75,7 @@ ShiftBounds line_dominance_bounds(WideInt winner_value,
 }
 
 struct Stats {
-    std::size_t length = 0;
+    std::size_t length = 0U;
     WideInt sum = 0;
     WideInt prefix = kNegativeInfinity;
     std::size_t prefix_length = 0U;
@@ -83,9 +83,12 @@ struct Stats {
     std::size_t suffix_length = 0U;
     WideInt best = kNegativeInfinity;
     std::size_t best_length = 0U;
-    ShiftBounds prefix_shifts;
-    ShiftBounds suffix_shifts;
-    ShiftBounds best_shifts;
+};
+
+struct Stability {
+    ShiftBounds prefix;
+    ShiftBounds suffix;
+    ShiftBounds best;
 };
 
 Stats singleton(std::int64_t value) noexcept {
@@ -110,82 +113,98 @@ Stats combine(const Stats& left, const Stats& right) noexcept {
     result.length = left.length + right.length;
     result.sum = left.sum + right.sum;
 
-    // Prefix: left.prefix wins a tie against left.sum + right.prefix.
     const WideInt prefix_cross = left.sum + right.prefix;
-    const std::size_t prefix_cross_length =
-        left.length + right.prefix_length;
-    const bool prefix_left_wins = left.prefix >= prefix_cross;
-    if (prefix_left_wins) {
+    const std::size_t prefix_cross_length = left.length + right.prefix_length;
+    if (left.prefix >= prefix_cross) {
         result.prefix = left.prefix;
         result.prefix_length = left.prefix_length;
     } else {
         result.prefix = prefix_cross;
         result.prefix_length = prefix_cross_length;
     }
-    ShiftBounds prefix_bounds = intersect_bounds(
-        left.prefix_shifts, right.prefix_shifts);
-    prefix_bounds = intersect_bounds(
-        prefix_bounds,
-        line_dominance_bounds(
-            result.prefix, result.prefix_length,
-            prefix_left_wins ? prefix_cross : left.prefix,
-            prefix_left_wins ? prefix_cross_length : left.prefix_length,
-            !prefix_left_wins));
-    result.prefix_shifts = prefix_bounds;
 
-    // Suffix: right.suffix wins a tie against left.suffix + right.sum.
     const WideInt suffix_cross = left.suffix + right.sum;
-    const std::size_t suffix_cross_length =
-        left.suffix_length + right.length;
-    const bool suffix_right_wins = right.suffix >= suffix_cross;
-    if (suffix_right_wins) {
+    const std::size_t suffix_cross_length = left.suffix_length + right.length;
+    if (right.suffix >= suffix_cross) {
         result.suffix = right.suffix;
         result.suffix_length = right.suffix_length;
     } else {
         result.suffix = suffix_cross;
         result.suffix_length = suffix_cross_length;
     }
-    ShiftBounds suffix_bounds = intersect_bounds(
-        left.suffix_shifts, right.suffix_shifts);
-    suffix_bounds = intersect_bounds(
-        suffix_bounds,
-        line_dominance_bounds(
-            result.suffix, result.suffix_length,
-            suffix_right_wins ? suffix_cross : right.suffix,
-            suffix_right_wins ? suffix_cross_length : right.suffix_length,
-            !suffix_right_wins));
-    result.suffix_shifts = suffix_bounds;
 
-    // Tie order matches max(max(left.best, right.best), cross).
-    const WideInt values[3] = {
+    const WideInt candidates[3] = {
         left.best, right.best, left.suffix + right.prefix};
     const std::size_t lengths[3] = {
         left.best_length, right.best_length,
         left.suffix_length + right.prefix_length};
     std::size_t winner = 0U;
     for (std::size_t i = 1U; i < 3U; ++i) {
-        if (values[i] > values[winner]) winner = i;
+        if (candidates[i] > candidates[winner]) winner = i;
     }
-    result.best = values[winner];
+    result.best = candidates[winner];
     result.best_length = lengths[winner];
-
-    ShiftBounds best_bounds = intersect_bounds(
-        left.best_shifts, right.best_shifts);
-    best_bounds = intersect_bounds(
-        best_bounds,
-        intersect_bounds(left.suffix_shifts, right.prefix_shifts));
-    for (std::size_t i = 0U; i < 3U; ++i) {
-        if (i == winner) continue;
-        best_bounds = intersect_bounds(
-            best_bounds,
-            line_dominance_bounds(
-                result.best, result.best_length, values[i], lengths[i],
-                winner > i));
-    }
-    result.best_shifts = best_bounds;
     return result;
 }
 
+Stability combine_stability(const Stats& left, const Stability& left_stability,
+                            const Stats& right, const Stability& right_stability,
+                            const Stats& result) noexcept {
+    if (left.length == 0U) return right_stability;
+    if (right.length == 0U) return left_stability;
+
+    Stability stable;
+    const WideInt prefix_cross = left.sum + right.prefix;
+    const std::size_t prefix_cross_length = left.length + right.prefix_length;
+    const bool prefix_left_wins = left.prefix >= prefix_cross;
+    stable.prefix = intersect_bounds(left_stability.prefix,
+                                     right_stability.prefix);
+    stable.prefix = intersect_bounds(
+        stable.prefix,
+        line_dominance_bounds(
+            result.prefix, result.prefix_length,
+            prefix_left_wins ? prefix_cross : left.prefix,
+            prefix_left_wins ? prefix_cross_length : left.prefix_length,
+            !prefix_left_wins));
+
+    const WideInt suffix_cross = left.suffix + right.sum;
+    const std::size_t suffix_cross_length = left.suffix_length + right.length;
+    const bool suffix_right_wins = right.suffix >= suffix_cross;
+    stable.suffix = intersect_bounds(left_stability.suffix,
+                                     right_stability.suffix);
+    stable.suffix = intersect_bounds(
+        stable.suffix,
+        line_dominance_bounds(
+            result.suffix, result.suffix_length,
+            suffix_right_wins ? suffix_cross : right.suffix,
+            suffix_right_wins ? suffix_cross_length : right.suffix_length,
+            !suffix_right_wins));
+
+    const WideInt candidates[3] = {
+        left.best, right.best, left.suffix + right.prefix};
+    const std::size_t lengths[3] = {
+        left.best_length, right.best_length,
+        left.suffix_length + right.prefix_length};
+    std::size_t winner = 0U;
+    for (std::size_t i = 1U; i < 3U; ++i) {
+        if (candidates[i] > candidates[winner]) winner = i;
+    }
+
+    stable.best = intersect_bounds(left_stability.best,
+                                   right_stability.best);
+    stable.best = intersect_bounds(
+        stable.best,
+        intersect_bounds(left_stability.suffix, right_stability.prefix));
+    for (std::size_t i = 0U; i < 3U; ++i) {
+        if (i == winner) continue;
+        stable.best = intersect_bounds(
+            stable.best,
+            line_dominance_bounds(
+                result.best, result.best_length, candidates[i], lengths[i],
+                winner > i));
+    }
+    return stable;
+}
 bool fits_int64(WideInt value) noexcept {
     return value >= static_cast<WideInt>(std::numeric_limits<std::int64_t>::min()) &&
            value <= static_cast<WideInt>(std::numeric_limits<std::int64_t>::max());
@@ -385,6 +404,8 @@ struct Block {
     mutable bool best_hull_dirty = false;
     WideInt best_zero = kNegativeInfinity;
     std::size_t best_zero_length = 0U;
+    mutable bool best_zero_bounds_valid = false;
+    mutable ShiftBounds best_zero_bounds;
     // Reuse scratch buffers across block rebuilds to avoid three heap
     // allocations on every insertion/update of a block.
     std::vector<WideInt> prefix_sums;
@@ -406,28 +427,21 @@ struct Block {
         result.prefix = prefix_hull.max_plus(lazy);
         result.prefix_length =
             static_cast<std::size_t>(prefix_hull.x[prefix_hull.cached_index]);
-        result.prefix_shifts = prefix_hull.support_shift_bounds(lazy);
 
         const WideInt suffix_delta = -lazy;
         result.suffix = suffix_hull.max_plus(suffix_delta) +
                         lazy * static_cast<WideInt>(values.size() + 1U);
         result.suffix_length = values.size() + 1U -
             static_cast<std::size_t>(suffix_hull.x[suffix_hull.cached_index]);
-        const ShiftBounds suffix_bounds =
-            suffix_hull.support_shift_bounds(suffix_delta);
-        result.suffix_shifts =
-            ShiftBounds{-suffix_bounds.high, -suffix_bounds.low};
 
         if (lazy == 0) {
             result.best = best_zero;
             result.best_length = best_zero_length;
-            result.best_shifts = best_zero_shift_bounds();
         } else {
             ensure_best_hull();
             result.best = best_hull.max_plus(lazy);
             result.best_length =
                 static_cast<std::size_t>(best_hull.x[best_hull.cached_index]);
-            result.best_shifts = best_hull.support_shift_bounds(lazy);
         }
         return result;
     }
@@ -439,18 +453,37 @@ struct Block {
     }
 
     ShiftBounds best_zero_shift_bounds() const noexcept {
+        if (best_zero_bounds_valid) return best_zero_bounds;
         ShiftBounds bounds;
-        if (best_zero_length == 0U) return bounds;
-        for (std::size_t i = 0U; i < best_sums.size(); ++i) {
-            const std::size_t length = i + 1U;
-            if (length == best_zero_length) continue;
-            bounds = intersect_bounds(
-                bounds,
-                line_dominance_bounds(
-                    best_zero, best_zero_length, best_sums[i], length,
-                    length < best_zero_length));
+        if (best_zero_length != 0U) {
+            for (std::size_t i = 0U; i < best_sums.size(); ++i) {
+                const std::size_t length = i + 1U;
+                if (length == best_zero_length) continue;
+                bounds = intersect_bounds(
+                    bounds,
+                    line_dominance_bounds(
+                        best_zero, best_zero_length, best_sums[i], length,
+                        length < best_zero_length));
+            }
         }
+        best_zero_bounds = bounds;
+        best_zero_bounds_valid = true;
         return bounds;
+    }
+
+    Stability stability() const noexcept {
+        Stability stable;
+        stable.prefix = prefix_hull.support_shift_bounds(lazy);
+        const ShiftBounds suffix_shift =
+            suffix_hull.support_shift_bounds(-lazy);
+        stable.suffix = ShiftBounds{-suffix_shift.high, -suffix_shift.low};
+        if (lazy == 0) {
+            stable.best = best_zero_shift_bounds();
+        } else {
+            ensure_best_hull();
+            stable.best = best_hull.support_shift_bounds(lazy);
+        }
+        return stable;
     }
 
     std::int64_t min_actual() const noexcept {
@@ -530,6 +563,7 @@ struct Block {
             // Build the full support hull only if a nonzero lazy shift later
             // needs it; this avoids rebuilding one hull per append.
             best_hull_dirty = true;
+            best_zero_bounds_valid = false;
             return;
         }
 
@@ -558,6 +592,7 @@ struct Block {
             best_hull_dirty = false;
             best_zero = kNegativeInfinity;
             best_zero_length = 0U;
+            best_zero_bounds_valid = false;
             lazy = 0;
             return;
         }
@@ -608,6 +643,7 @@ struct Block {
         best_zero = *best_it;
         best_zero_length =
             static_cast<std::size_t>(best_it - best_sums.begin()) + 1U;
+        best_zero_bounds_valid = false;
     }
 };
 
@@ -634,6 +670,8 @@ struct TransactionEngine::Node {
     std::int64_t subtree_max;
     std::size_t subtree_length;
     WideInt pending_add = 0;
+    Stability aggregate_stability;
+    bool aggregate_stability_valid = false;
 };
 
 TransactionEngine::TransactionEngine() noexcept
@@ -661,6 +699,7 @@ void TransactionEngine::destroy(Node* node) noexcept {
 
 void TransactionEngine::pull_aggregate(Node* node) noexcept {
     if (node == nullptr) return;
+    node->aggregate_stability_valid = false;
 
     Stats result;
     if (node->left != nullptr) result = node->left->aggregate;
@@ -833,16 +872,44 @@ void TransactionEngine::apply_add_subtree(Node* node,
                                           WideInt delta) noexcept {
     if (node == nullptr || delta == 0) return;
 
-    Stats& aggregate = node->aggregate;
+    const auto get_stability = [&](const auto& self, Node* current) -> Stability {
+        if (current == nullptr) return Stability{};
+        if (current->aggregate_stability_valid) {
+            return current->aggregate_stability;
+        }
+
+        const Stats empty_stats{};
+        const Stats left_stats = current->left != nullptr
+            ? current->left->aggregate : empty_stats;
+        const Stability left_stability =
+            self(self, current->left);
+        const Stats block_stats = current->block_aggregate;
+        const Stability block_stability = current->block.stability();
+
+        const Stats left_and_block = combine(left_stats, block_stats);
+        const Stability left_and_block_stability = combine_stability(
+            left_stats, left_stability, block_stats, block_stability,
+            left_and_block);
+
+        const Stats right_stats = current->right != nullptr
+            ? current->right->aggregate : empty_stats;
+        const Stability right_stability =
+            self(self, current->right);
+        current->aggregate_stability = combine_stability(
+            left_and_block, left_and_block_stability,
+            right_stats, right_stability, current->aggregate);
+        current->aggregate_stability_valid = true;
+        return current->aggregate_stability;
+    };
+
+    const Stability stability = get_stability(get_stability, node);
     const bool stable =
-        delta >= aggregate.prefix_shifts.low &&
-        delta <= aggregate.prefix_shifts.high &&
-        delta >= aggregate.suffix_shifts.low &&
-        delta <= aggregate.suffix_shifts.high &&
-        delta >= aggregate.best_shifts.low &&
-        delta <= aggregate.best_shifts.high;
+        delta >= stability.prefix.low && delta <= stability.prefix.high &&
+        delta >= stability.suffix.low && delta <= stability.suffix.high &&
+        delta >= stability.best.low && delta <= stability.best.high;
 
     if (stable) {
+        Stats& aggregate = node->aggregate;
         aggregate.sum += delta * static_cast<WideInt>(aggregate.length);
         aggregate.prefix +=
             delta * static_cast<WideInt>(aggregate.prefix_length);
@@ -850,12 +917,12 @@ void TransactionEngine::apply_add_subtree(Node* node,
             delta * static_cast<WideInt>(aggregate.suffix_length);
         aggregate.best +=
             delta * static_cast<WideInt>(aggregate.best_length);
-        aggregate.prefix_shifts.low -= delta;
-        aggregate.prefix_shifts.high -= delta;
-        aggregate.suffix_shifts.low -= delta;
-        aggregate.suffix_shifts.high -= delta;
-        aggregate.best_shifts.low -= delta;
-        aggregate.best_shifts.high -= delta;
+        node->aggregate_stability.prefix.low -= delta;
+        node->aggregate_stability.prefix.high -= delta;
+        node->aggregate_stability.suffix.low -= delta;
+        node->aggregate_stability.suffix.high -= delta;
+        node->aggregate_stability.best.low -= delta;
+        node->aggregate_stability.best.high -= delta;
 
         node->subtree_min = static_cast<std::int64_t>(
             static_cast<WideInt>(node->subtree_min) + delta);
@@ -865,8 +932,7 @@ void TransactionEngine::apply_add_subtree(Node* node,
         return;
     }
 
-    // If the current support points would change, descend and rebuild exact
-    // summaries. Stable shifts instead stay lazy at the subtree root.
+    // If a support point would change, descend and repair exact summaries.
     push_lazy(node);
     apply_add_subtree(node->left, delta);
     node->block.lazy += delta;

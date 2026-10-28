@@ -704,7 +704,7 @@ void test_degenerate_and_extreme_values(int& failures) {
             }
         }
     }
-    std::cout << "Degenerate/extreme-value profile tests passed across all splits.\\n";
+    std::cout << "Degenerate/extreme-value profile tests passed across all splits.\n";
 }
 
 }  // namespace

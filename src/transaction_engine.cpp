@@ -154,6 +154,14 @@ struct Block {
         return result;
     }
 
+    std::int64_t min_actual() const noexcept {
+        return static_cast<std::int64_t>(static_cast<WideInt>(min_value) + lazy);
+    }
+
+    std::int64_t max_actual() const noexcept {
+        return static_cast<std::int64_t>(static_cast<WideInt>(max_value) + lazy);
+    }
+
     void validate_full_add(std::int64_t delta) const {
         const WideInt shift = lazy + static_cast<WideInt>(delta);
         if (!fits_int64(static_cast<WideInt>(min_value) + shift) ||
@@ -249,6 +257,8 @@ struct TransactionEngine::Node {
           block(std::move(initial_values)),
           block_aggregate(block.stats()),
           aggregate(block_aggregate),
+          subtree_min(block.min_actual()),
+          subtree_max(block.max_actual()),
           subtree_length(block.size()) {}
 
     Node* left = nullptr;
@@ -257,6 +267,8 @@ struct TransactionEngine::Node {
     Block block;
     Stats block_aggregate;
     Stats aggregate;
+    std::int64_t subtree_min;
+    std::int64_t subtree_max;
     std::size_t subtree_length;
 };
 
@@ -292,6 +304,16 @@ void TransactionEngine::pull(Node* node) noexcept {
     if (node->right != nullptr) result = combine(result, node->right->aggregate);
 
     node->aggregate = result;
+    node->subtree_min = node->block.min_actual();
+    node->subtree_max = node->block.max_actual();
+    if (node->left != nullptr) {
+        node->subtree_min = std::min(node->subtree_min, node->left->subtree_min);
+        node->subtree_max = std::max(node->subtree_max, node->left->subtree_max);
+    }
+    if (node->right != nullptr) {
+        node->subtree_min = std::min(node->subtree_min, node->right->subtree_min);
+        node->subtree_max = std::max(node->subtree_max, node->right->subtree_max);
+    }
     node->subtree_length = node_size(node->left) + node->block.size() +
                            node_size(node->right);
 }
@@ -368,14 +390,6 @@ void TransactionEngine::insert_transaction(std::size_t position,
     root_ = insert_at(root_, position, value);
 }
 
-void TransactionEngine::validate_subtree_add(const Node* node,
-                                              std::int64_t delta) const {
-    if (node == nullptr) return;
-    node->block.validate_full_add(delta);
-    validate_subtree_add(node->left, delta);
-    validate_subtree_add(node->right, delta);
-}
-
 void TransactionEngine::validate_add_range(const Node* node,
                                             std::size_t subtree_start,
                                             std::size_t left,
@@ -385,7 +399,11 @@ void TransactionEngine::validate_add_range(const Node* node,
     const std::size_t subtree_end = subtree_start + node_size(node) - 1U;
     if (right < subtree_start || left > subtree_end) return;
     if (left <= subtree_start && subtree_end <= right) {
-        validate_subtree_add(node, delta);
+        const WideInt new_min = static_cast<WideInt>(node->subtree_min) + delta;
+        const WideInt new_max = static_cast<WideInt>(node->subtree_max) + delta;
+        if (!fits_int64(new_min) || !fits_int64(new_max)) {
+            throw std::overflow_error("transaction value would overflow int64_t");
+        }
         return;
     }
 

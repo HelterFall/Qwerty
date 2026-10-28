@@ -129,38 +129,49 @@ Slope edge_slope(const std::vector<Point>& hull, std::size_t edge) {
         static_cast<Wide>(hull[edge + 1U].length) - hull[edge].length};
 }
 
-// Both edge lists are sorted by descending slope. Select their k-th combined
-// edge without materializing or sorting the union.
-Slope kth_slope_desc(const std::vector<Slope>& a,
-                     const std::vector<Slope>& b,
-                     std::size_t k) {
-    const std::vector<Slope>* first = &a;
-    const std::vector<Slope>* second = &b;
-    if (first->size() > second->size()) std::swap(first, second);
+// Both chains have non-increasing edge slopes. Select the k-th slope in
+// their union by partitioning the two sorted edge sequences, without copying
+// their edges into temporary vectors.
+std::size_t edge_count(const std::vector<Point>& hull) {
+    return hull.empty() ? 0U : hull.size() - 1U;
+}
 
-    std::size_t low = k + 1U > second->size() ? k + 1U - second->size() : 0U;
-    std::size_t high = std::min(k + 1U, first->size());
+Slope kth_slope_desc(const std::vector<Point>& a_hull,
+                     const std::vector<Point>& b_hull,
+                     std::size_t k) {
+    const std::vector<Point>* first = &a_hull;
+    const std::vector<Point>* second = &b_hull;
+    if (edge_count(*first) > edge_count(*second)) std::swap(first, second);
+
+    const std::size_t n1 = edge_count(*first);
+    const std::size_t n2 = edge_count(*second);
+    const auto edge = [](const std::vector<Point>& hull, std::size_t index) {
+        return edge_slope(hull, index);
+    };
+
+    std::size_t low = k + 1U > n2 ? k + 1U - n2 : 0U;
+    std::size_t high = std::min(k + 1U, n1);
     while (low <= high) {
         const std::size_t take_first = low + (high - low) / 2U;
         const std::size_t take_second = k + 1U - take_first;
 
-        if (take_first > 0U && take_second < second->size() &&
-            compare_slope((*first)[take_first - 1U],
-                          (*second)[take_second]) < 0) {
+        if (take_first > 0U && take_second < n2 &&
+            compare_slope(edge(*first, take_first - 1U),
+                          edge(*second, take_second)) < 0) {
             high = take_first - 1U;
             continue;
         }
-        if (take_second > 0U && take_first < first->size() &&
-            compare_slope((*second)[take_second - 1U],
-                          (*first)[take_first]) < 0) {
+        if (take_second > 0U && take_first < n1 &&
+            compare_slope(edge(*second, take_second - 1U),
+                          edge(*first, take_first)) < 0) {
             low = take_first + 1U;
             continue;
         }
 
-        if (take_first == 0U) return (*second)[take_second - 1U];
-        if (take_second == 0U) return (*first)[take_first - 1U];
-        const Slope& last_first = (*first)[take_first - 1U];
-        const Slope& last_second = (*second)[take_second - 1U];
+        if (take_first == 0U) return edge(*second, take_second - 1U);
+        if (take_second == 0U) return edge(*first, take_first - 1U);
+        const Slope last_first = edge(*first, take_first - 1U);
+        const Slope last_second = edge(*second, take_second - 1U);
         return compare_slope(last_first, last_second) < 0
             ? last_first : last_second;
     }
@@ -207,25 +218,14 @@ Wide bridge_gap(const std::vector<Point>& left,
 std::pair<std::size_t, std::size_t> find_disjoint_upper_bridge(
     const std::vector<Point>& left,
     const std::vector<Point>& right) {
-    std::vector<Slope> left_edges;
-    std::vector<Slope> right_edges;
-    left_edges.reserve(left.size() > 0U ? left.size() - 1U : 0U);
-    right_edges.reserve(right.size() > 0U ? right.size() - 1U : 0U);
-    for (std::size_t i = 0; i + 1U < left.size(); ++i) {
-        left_edges.push_back(edge_slope(left, i));
-    }
-    for (std::size_t i = 0; i + 1U < right.size(); ++i) {
-        right_edges.push_back(edge_slope(right, i));
-    }
-
-    const std::size_t edge_count = left_edges.size() + right_edges.size();
-    if (edge_count == 0U) return {0U, 0U};
+    const std::size_t total_edges = edge_count(left) + edge_count(right);
+    if (total_edges == 0U) return {0U, 0U};
 
     std::size_t low = 0U;
-    std::size_t high = edge_count;
+    std::size_t high = total_edges;
     while (low < high) {
         const std::size_t middle = low + (high - low) / 2U;
-        const Slope candidate = kth_slope_desc(left_edges, right_edges, middle);
+        const Slope candidate = kth_slope_desc(left, right, middle);
         const Wide gap = bridge_gap(left, right, candidate);
         if (gap > 0) {
             // The common tangent slope is smaller; continue to later edges.
@@ -236,11 +236,11 @@ std::pair<std::size_t, std::size_t> find_disjoint_upper_bridge(
     }
 
     Slope probe;
-    if (low == edge_count) {
-        probe = kth_slope_desc(left_edges, right_edges, edge_count - 1U);
+    if (low == total_edges) {
+        probe = kth_slope_desc(left, right, total_edges - 1U);
         probe.dy = probe.dy - probe.dx;  // Strictly below every edge slope.
     } else {
-        const Slope current = kth_slope_desc(left_edges, right_edges, low);
+        const Slope current = kth_slope_desc(left, right, low);
         if (bridge_gap(left, right, current) == 0) {
             std::size_t left_index = 0U;
             std::size_t right_index = 0U;
@@ -252,8 +252,7 @@ std::pair<std::size_t, std::size_t> find_disjoint_upper_bridge(
             probe = current;
             probe.dy = probe.dy + probe.dx;  // Strictly above every edge slope.
         } else {
-            const Slope previous =
-                kth_slope_desc(left_edges, right_edges, low - 1U);
+            const Slope previous = kth_slope_desc(left, right, low - 1U);
             probe = Slope{
                 previous.dy * current.dx + current.dy * previous.dx,
                 static_cast<Wide>(2) * previous.dx * current.dx};

@@ -10,6 +10,7 @@ namespace transaction_engine {
 namespace {
 
 constexpr WideInt kNegativeInfinity = -(static_cast<WideInt>(1) << 120);
+constexpr WideInt kPositiveInfinity = -kNegativeInfinity;
 #ifndef TRANSACTION_ENGINE_BLOCK_SIZE
 #define TRANSACTION_ENGINE_BLOCK_SIZE 512
 #endif
@@ -18,30 +19,170 @@ constexpr std::size_t kMaxBlockSize = TRANSACTION_ENGINE_BLOCK_SIZE;
 static_assert(kMaxBlockSize >= 2U && kMaxBlockSize <= 65535U,
               "block size must fit the uint16_t hull coordinate type");
 
+struct ShiftBounds {
+    WideInt low = kNegativeInfinity;
+    WideInt high = kPositiveInfinity;
+};
+
+WideInt floor_div(WideInt numerator, WideInt denominator) noexcept {
+    WideInt quotient = numerator / denominator;
+    if (numerator % denominator < 0) --quotient;
+    return quotient;
+}
+
+WideInt ceil_div(WideInt numerator, WideInt denominator) noexcept {
+    WideInt quotient = numerator / denominator;
+    if (numerator % denominator > 0) ++quotient;
+    return quotient;
+}
+
+ShiftBounds intersect_bounds(ShiftBounds left, ShiftBounds right) noexcept {
+    return ShiftBounds{std::max(left.low, right.low),
+                       std::min(left.high, right.high)};
+}
+
+// Integer shifts for which the selected line stays above a competitor.
+// A strict comparison is needed when the competitor wins ties by priority.
+ShiftBounds line_dominance_bounds(WideInt winner_value,
+                                  std::size_t winner_length,
+                                  WideInt other_value,
+                                  std::size_t other_length,
+                                  bool strict) noexcept {
+    const WideInt value_difference = winner_value - other_value;
+    const WideInt slope_difference =
+        static_cast<WideInt>(winner_length) -
+        static_cast<WideInt>(other_length);
+
+    if (slope_difference > 0) {
+        const WideInt low = strict
+            ? floor_div(-value_difference, slope_difference) + 1
+            : ceil_div(-value_difference, slope_difference);
+        return ShiftBounds{low, kPositiveInfinity};
+    }
+    if (slope_difference < 0) {
+        const WideInt positive_slope = -slope_difference;
+        const WideInt high = strict
+            ? ceil_div(value_difference, positive_slope) - 1
+            : floor_div(value_difference, positive_slope);
+        return ShiftBounds{kNegativeInfinity, high};
+    }
+
+    const bool wins_at_all_shifts =
+        strict ? value_difference > 0 : value_difference >= 0;
+    return wins_at_all_shifts
+        ? ShiftBounds{}
+        : ShiftBounds{kPositiveInfinity, kNegativeInfinity};
+}
+
 struct Stats {
     std::size_t length = 0;
     WideInt sum = 0;
     WideInt prefix = kNegativeInfinity;
+    std::size_t prefix_length = 0U;
     WideInt suffix = kNegativeInfinity;
+    std::size_t suffix_length = 0U;
     WideInt best = kNegativeInfinity;
+    std::size_t best_length = 0U;
+    ShiftBounds prefix_shifts;
+    ShiftBounds suffix_shifts;
+    ShiftBounds best_shifts;
 };
 
 Stats singleton(std::int64_t value) noexcept {
     const WideInt v = static_cast<WideInt>(value);
-    return Stats{1, v, v, v, v};
+    Stats result;
+    result.length = 1U;
+    result.sum = v;
+    result.prefix = v;
+    result.prefix_length = 1U;
+    result.suffix = v;
+    result.suffix_length = 1U;
+    result.best = v;
+    result.best_length = 1U;
+    return result;
 }
 
 Stats combine(const Stats& left, const Stats& right) noexcept {
-    if (left.length == 0) return right;
-    if (right.length == 0) return left;
+    if (left.length == 0U) return right;
+    if (right.length == 0U) return left;
 
     Stats result;
     result.length = left.length + right.length;
     result.sum = left.sum + right.sum;
-    result.prefix = std::max(left.prefix, left.sum + right.prefix);
-    result.suffix = std::max(right.suffix, right.sum + left.suffix);
-    result.best = std::max(std::max(left.best, right.best),
-                           left.suffix + right.prefix);
+
+    // Prefix: left.prefix wins a tie against left.sum + right.prefix.
+    const WideInt prefix_cross = left.sum + right.prefix;
+    const std::size_t prefix_cross_length =
+        left.length + right.prefix_length;
+    const bool prefix_left_wins = left.prefix >= prefix_cross;
+    if (prefix_left_wins) {
+        result.prefix = left.prefix;
+        result.prefix_length = left.prefix_length;
+    } else {
+        result.prefix = prefix_cross;
+        result.prefix_length = prefix_cross_length;
+    }
+    ShiftBounds prefix_bounds = intersect_bounds(
+        left.prefix_shifts, right.prefix_shifts);
+    prefix_bounds = intersect_bounds(
+        prefix_bounds,
+        line_dominance_bounds(
+            result.prefix, result.prefix_length,
+            prefix_left_wins ? prefix_cross : left.prefix,
+            prefix_left_wins ? prefix_cross_length : left.prefix_length,
+            !prefix_left_wins));
+    result.prefix_shifts = prefix_bounds;
+
+    // Suffix: right.suffix wins a tie against left.suffix + right.sum.
+    const WideInt suffix_cross = left.suffix + right.sum;
+    const std::size_t suffix_cross_length =
+        left.suffix_length + right.length;
+    const bool suffix_right_wins = right.suffix >= suffix_cross;
+    if (suffix_right_wins) {
+        result.suffix = right.suffix;
+        result.suffix_length = right.suffix_length;
+    } else {
+        result.suffix = suffix_cross;
+        result.suffix_length = suffix_cross_length;
+    }
+    ShiftBounds suffix_bounds = intersect_bounds(
+        left.suffix_shifts, right.suffix_shifts);
+    suffix_bounds = intersect_bounds(
+        suffix_bounds,
+        line_dominance_bounds(
+            result.suffix, result.suffix_length,
+            suffix_right_wins ? suffix_cross : right.suffix,
+            suffix_right_wins ? suffix_cross_length : right.suffix_length,
+            !suffix_right_wins));
+    result.suffix_shifts = suffix_bounds;
+
+    // Tie order matches max(max(left.best, right.best), cross).
+    const WideInt values[3] = {
+        left.best, right.best, left.suffix + right.prefix};
+    const std::size_t lengths[3] = {
+        left.best_length, right.best_length,
+        left.suffix_length + right.prefix_length};
+    std::size_t winner = 0U;
+    for (std::size_t i = 1U; i < 3U; ++i) {
+        if (values[i] > values[winner]) winner = i;
+    }
+    result.best = values[winner];
+    result.best_length = lengths[winner];
+
+    ShiftBounds best_bounds = intersect_bounds(
+        left.best_shifts, right.best_shifts);
+    best_bounds = intersect_bounds(
+        best_bounds,
+        intersect_bounds(left.suffix_shifts, right.prefix_shifts));
+    for (std::size_t i = 0U; i < 3U; ++i) {
+        if (i == winner) continue;
+        best_bounds = intersect_bounds(
+            best_bounds,
+            line_dominance_bounds(
+                result.best, result.best_length, values[i], lengths[i],
+                winner > i));
+    }
+    result.best_shifts = best_bounds;
     return result;
 }
 
@@ -200,6 +341,28 @@ struct Hull {
         cached_index = best;
         return value_at(best);
     }
+
+    // Integer perturbations of delta for which the selected hull vertex stays
+    // optimal. On equal support values the rightmost vertex wins.
+    ShiftBounds support_shift_bounds(WideInt delta) const noexcept {
+        if (x.empty()) return ShiftBounds{};
+        static_cast<void>(max_plus(delta));
+        const std::size_t index = cached_index;
+        ShiftBounds bounds;
+        if (index > 0U) {
+            const WideInt denominator =
+                static_cast<WideInt>(x[index] - x[index - 1U]);
+            const WideInt numerator = y[index - 1U] - y[index];
+            bounds.low = ceil_div(numerator, denominator) - delta;
+        }
+        if (index + 1U < x.size()) {
+            const WideInt denominator =
+                static_cast<WideInt>(x[index + 1U] - x[index]);
+            const WideInt numerator = y[index] - y[index + 1U];
+            bounds.high = ceil_div(numerator, denominator) - 1 - delta;
+        }
+        return bounds;
+    }
 };
 
 struct Block {
@@ -221,6 +384,7 @@ struct Block {
     mutable Hull best_hull;
     mutable bool best_hull_dirty = false;
     WideInt best_zero = kNegativeInfinity;
+    std::size_t best_zero_length = 0U;
     // Reuse scratch buffers across block rebuilds to avoid three heap
     // allocations on every insertion/update of a block.
     std::vector<WideInt> prefix_sums;
@@ -238,14 +402,32 @@ struct Block {
         Stats result;
         result.length = values.size();
         result.sum = base_sum + lazy * static_cast<WideInt>(values.size());
+
         result.prefix = prefix_hull.max_plus(lazy);
-        result.suffix = suffix_hull.max_plus(-lazy) +
+        result.prefix_length =
+            static_cast<std::size_t>(prefix_hull.x[prefix_hull.cached_index]);
+        result.prefix_shifts = prefix_hull.support_shift_bounds(lazy);
+
+        const WideInt suffix_delta = -lazy;
+        result.suffix = suffix_hull.max_plus(suffix_delta) +
                         lazy * static_cast<WideInt>(values.size() + 1U);
+        result.suffix_length = values.size() + 1U -
+            static_cast<std::size_t>(suffix_hull.x[suffix_hull.cached_index]);
+        const ShiftBounds suffix_bounds =
+            suffix_hull.support_shift_bounds(suffix_delta);
+        result.suffix_shifts =
+            ShiftBounds{-suffix_bounds.high, -suffix_bounds.low};
+
         if (lazy == 0) {
             result.best = best_zero;
+            result.best_length = best_zero_length;
+            result.best_shifts = best_zero_shift_bounds();
         } else {
             ensure_best_hull();
             result.best = best_hull.max_plus(lazy);
+            result.best_length =
+                static_cast<std::size_t>(best_hull.x[best_hull.cached_index]);
+            result.best_shifts = best_hull.support_shift_bounds(lazy);
         }
         return result;
     }
@@ -256,6 +438,21 @@ struct Block {
         best_hull_dirty = false;
     }
 
+    ShiftBounds best_zero_shift_bounds() const noexcept {
+        ShiftBounds bounds;
+        if (best_zero_length == 0U) return bounds;
+        for (std::size_t i = 0U; i < best_sums.size(); ++i) {
+            const std::size_t length = i + 1U;
+            if (length == best_zero_length) continue;
+            bounds = intersect_bounds(
+                bounds,
+                line_dominance_bounds(
+                    best_zero, best_zero_length, best_sums[i], length,
+                    length < best_zero_length));
+        }
+        return bounds;
+    }
+
     std::int64_t min_actual() const noexcept {
         return static_cast<std::int64_t>(static_cast<WideInt>(min_value) + lazy);
     }
@@ -264,8 +461,8 @@ struct Block {
         return static_cast<std::int64_t>(static_cast<WideInt>(max_value) + lazy);
     }
 
-    void validate_full_add(std::int64_t delta) const {
-        const WideInt shift = lazy + static_cast<WideInt>(delta);
+    void validate_full_add(WideInt delta) const {
+        const WideInt shift = lazy + delta;
         if (!fits_int64(static_cast<WideInt>(min_value) + shift) ||
             !fits_int64(static_cast<WideInt>(max_value) + shift)) {
             throw std::overflow_error("transaction value would overflow int64_t");
@@ -311,11 +508,24 @@ struct Block {
             for (std::size_t i = 0; i < old_size; ++i) {
                 if (suffix_sums[i] > best_sums[i]) {
                     best_sums[i] = suffix_sums[i];
-                    best_zero = std::max(best_zero, best_sums[i]);
+                }
+                const std::size_t candidate_length = i + 1U;
+                if (best_sums[i] > best_zero ||
+                    (best_sums[i] == best_zero &&
+                     (best_zero_length == 0U ||
+                      candidate_length < best_zero_length))) {
+                    best_zero = best_sums[i];
+                    best_zero_length = candidate_length;
                 }
             }
             best_sums[old_size] = suffix_sums[old_size];
-            best_zero = std::max(best_zero, best_sums[old_size]);
+            if (best_sums[old_size] > best_zero ||
+                (best_sums[old_size] == best_zero &&
+                 (best_zero_length == 0U ||
+                  old_size + 1U < best_zero_length))) {
+                best_zero = best_sums[old_size];
+                best_zero_length = old_size + 1U;
+            }
             // The exact zero-shift maximum is maintained incrementally.
             // Build the full support hull only if a nonzero lazy shift later
             // needs it; this avoids rebuilding one hull per append.
@@ -347,6 +557,7 @@ struct Block {
             best_hull.build({});
             best_hull_dirty = false;
             best_zero = kNegativeInfinity;
+            best_zero_length = 0U;
             lazy = 0;
             return;
         }
@@ -392,7 +603,11 @@ struct Block {
         suffix_hull.build_suffix(suffix_sums);
         best_hull.build(best_sums);
         best_hull_dirty = false;
-        best_zero = *std::max_element(best_sums.begin(), best_sums.end());
+        const auto best_it =
+            std::max_element(best_sums.begin(), best_sums.end());
+        best_zero = *best_it;
+        best_zero_length =
+            static_cast<std::size_t>(best_it - best_sums.begin()) + 1U;
     }
 };
 
@@ -418,6 +633,7 @@ struct TransactionEngine::Node {
     std::int64_t subtree_min;
     std::int64_t subtree_max;
     std::size_t subtree_length;
+    WideInt pending_add = 0;
 };
 
 TransactionEngine::TransactionEngine() noexcept
@@ -471,16 +687,30 @@ void TransactionEngine::pull(Node* node) noexcept {
                            node_size(node->right);
 }
 
+void TransactionEngine::push_lazy(Node* node) noexcept {
+    if (node == nullptr || node->pending_add == 0) return;
+    const WideInt delta = node->pending_add;
+    node->pending_add = 0;
+
+    apply_add_subtree(node->left, delta);
+    node->block.lazy += delta;
+    node->block_aggregate = node->block.stats();
+    apply_add_subtree(node->right, delta);
+    pull(node);
+}
+
 TransactionEngine::Node* TransactionEngine::merge(Node* left,
                                                    Node* right) noexcept {
     if (left == nullptr) return right;
     if (right == nullptr) return left;
 
     if (left->priority > right->priority) {
+        push_lazy(left);
         left->right = merge(left->right, right);
         pull(left);
         return left;
     }
+    push_lazy(right);
     right->left = merge(left, right->left);
     pull(right);
     return right;
@@ -492,6 +722,7 @@ TransactionEngine::Node* TransactionEngine::insert_at(
         std::vector<std::int64_t> initial{value};
         return new Node(std::move(initial), next_priority());
     }
+    push_lazy(root);
 
     const std::size_t left_count = node_size(root->left);
     const std::size_t block_count = root->block.size();
@@ -547,13 +778,16 @@ void TransactionEngine::validate_add_range(const Node* node,
                                             std::size_t subtree_start,
                                             std::size_t left,
                                             std::size_t right,
-                                            std::int64_t delta) const {
+                                            std::int64_t delta,
+                                            WideInt inherited_add) const {
     if (node == nullptr) return;
     const std::size_t subtree_end = subtree_start + node_size(node) - 1U;
     if (right < subtree_start || left > subtree_end) return;
     if (left <= subtree_start && subtree_end <= right) {
-        const WideInt new_min = static_cast<WideInt>(node->subtree_min) + delta;
-        const WideInt new_max = static_cast<WideInt>(node->subtree_max) + delta;
+        const WideInt new_min =
+            static_cast<WideInt>(node->subtree_min) + inherited_add + delta;
+        const WideInt new_max =
+            static_cast<WideInt>(node->subtree_max) + inherited_add + delta;
         if (!fits_int64(new_min) || !fits_int64(new_max)) {
             throw std::overflow_error("transaction value would overflow int64_t");
         }
@@ -563,22 +797,26 @@ void TransactionEngine::validate_add_range(const Node* node,
     const std::size_t left_count = node_size(node->left);
     const std::size_t block_start = subtree_start + left_count;
     const std::size_t block_end = block_start + node->block.size() - 1U;
+    const WideInt child_inherited = inherited_add + node->pending_add;
 
-    validate_add_range(node->left, subtree_start, left, right, delta);
+    validate_add_range(node->left, subtree_start, left, right, delta,
+                       child_inherited);
 
     if (!(right < block_start || left > block_end)) {
         const std::size_t local_left =
             std::max(left, block_start) - block_start;
         const std::size_t local_right =
             std::min(right, block_end) - block_start;
+        const WideInt effective_shift =
+            inherited_add + node->pending_add + delta;
 
         if (local_left == 0U && local_right + 1U == node->block.size()) {
-            node->block.validate_full_add(delta);
+            node->block.validate_full_add(effective_shift);
         } else {
             for (std::size_t i = local_left; i <= local_right; ++i) {
                 const WideInt updated =
                     static_cast<WideInt>(node->block.values[i]) +
-                    node->block.lazy + static_cast<WideInt>(delta);
+                    node->block.lazy + effective_shift;
                 if (!fits_int64(updated)) {
                     throw std::overflow_error(
                         "transaction value would overflow int64_t");
@@ -587,24 +825,54 @@ void TransactionEngine::validate_add_range(const Node* node,
         }
     }
 
-    validate_add_range(node->right, block_end + 1U, left, right, delta);
+    validate_add_range(node->right, block_end + 1U, left, right, delta,
+                       child_inherited);
 }
 
-void TransactionEngine::apply_add_subtree(Node* node, std::int64_t delta) {
-    if (node == nullptr) return;
+void TransactionEngine::apply_add_subtree(Node* node,
+                                          WideInt delta) noexcept {
+    if (node == nullptr || delta == 0) return;
 
-    // Every value in this subtree moves by the same delta, so its minimum and
-    // maximum shift directly and its length cannot change.
-    node->subtree_min = static_cast<std::int64_t>(
-        static_cast<WideInt>(node->subtree_min) + delta);
-    node->subtree_max = static_cast<std::int64_t>(
-        static_cast<WideInt>(node->subtree_max) + delta);
+    Stats& aggregate = node->aggregate;
+    const bool stable =
+        delta >= aggregate.prefix_shifts.low &&
+        delta <= aggregate.prefix_shifts.high &&
+        delta >= aggregate.suffix_shifts.low &&
+        delta <= aggregate.suffix_shifts.high &&
+        delta >= aggregate.best_shifts.low &&
+        delta <= aggregate.best_shifts.high;
 
-    node->block.lazy += static_cast<WideInt>(delta);
-    node->block_aggregate = node->block.stats();
+    if (stable) {
+        aggregate.sum += delta * static_cast<WideInt>(aggregate.length);
+        aggregate.prefix +=
+            delta * static_cast<WideInt>(aggregate.prefix_length);
+        aggregate.suffix +=
+            delta * static_cast<WideInt>(aggregate.suffix_length);
+        aggregate.best +=
+            delta * static_cast<WideInt>(aggregate.best_length);
+        aggregate.prefix_shifts.low -= delta;
+        aggregate.prefix_shifts.high -= delta;
+        aggregate.suffix_shifts.low -= delta;
+        aggregate.suffix_shifts.high -= delta;
+        aggregate.best_shifts.low -= delta;
+        aggregate.best_shifts.high -= delta;
+
+        node->subtree_min = static_cast<std::int64_t>(
+            static_cast<WideInt>(node->subtree_min) + delta);
+        node->subtree_max = static_cast<std::int64_t>(
+            static_cast<WideInt>(node->subtree_max) + delta);
+        node->pending_add += delta;
+        return;
+    }
+
+    // If the current support points would change, descend and rebuild exact
+    // summaries. Stable shifts instead stay lazy at the subtree root.
+    push_lazy(node);
     apply_add_subtree(node->left, delta);
+    node->block.lazy += delta;
+    node->block_aggregate = node->block.stats();
     apply_add_subtree(node->right, delta);
-    pull_aggregate(node);
+    pull(node);
 }
 
 void TransactionEngine::apply_add_range(Node* node,
@@ -616,10 +884,11 @@ void TransactionEngine::apply_add_range(Node* node,
     const std::size_t subtree_end = subtree_start + node_size(node) - 1U;
     if (right < subtree_start || left > subtree_end) return;
     if (left <= subtree_start && subtree_end <= right) {
-        apply_add_subtree(node, delta);
+        apply_add_subtree(node, static_cast<WideInt>(delta));
         return;
     }
 
+    push_lazy(node);
     const std::size_t left_count = node_size(node->left);
     const std::size_t block_start = subtree_start + left_count;
     const std::size_t block_end = block_start + node->block.size() - 1U;
@@ -653,7 +922,7 @@ void TransactionEngine::bulk_adjust_balance(std::size_t left_index,
     if (delta == 0) return;
 
     // Validate the entire operation before mutating anything.
-    validate_add_range(root_, 0U, left_index, right_index, delta);
+    validate_add_range(root_, 0U, left_index, right_index, delta, 0);
     apply_add_range(root_, 0U, left_index, right_index, delta);
 }
 
@@ -663,7 +932,7 @@ WideInt TransactionEngine::get_max_profit_period(std::size_t left_index,
         throw std::out_of_range("query range must be a valid inclusive range");
     }
 
-    const auto query = [&](const auto& self, const Node* node,
+    const auto query = [&](const auto& self, Node* node,
                            std::size_t subtree_start) -> Stats {
         if (node == nullptr) return Stats{};
 
@@ -675,6 +944,7 @@ WideInt TransactionEngine::get_max_profit_period(std::size_t left_index,
             return node->aggregate;
         }
 
+        push_lazy(node);
         const std::size_t left_count = node_size(node->left);
         const std::size_t block_start = subtree_start + left_count;
         const std::size_t block_end = block_start + node->block.size() - 1U;

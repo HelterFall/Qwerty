@@ -5,6 +5,7 @@
 #include <limits>
 #include <random>
 #include <string>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -433,6 +434,14 @@ void check(bool condition, const std::string& message, int& failures) {
     }
 }
 
+bool same_hull(const std::vector<Point>& a, const std::vector<Point>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i].length != b[i].length || a[i].sum != b[i].sum) return false;
+    }
+    return true;
+}
+
 Wide brute_prefix(const std::vector<std::int64_t>& values,
                   std::int64_t offset) {
     Wide sum = 0;
@@ -511,6 +520,10 @@ void test_randomized_composition(int& failures) {
         const Profile direct = make_profile(values);
         check(joined.length == direct.length, "joined profile length is exact", failures);
         check(joined.total == direct.total, "joined total is exact", failures);
+        check(same_hull(joined.prefix, direct.prefix),
+              "disjoint bridge merge produces the exact prefix hull", failures);
+        check(same_hull(joined.suffix, direct.suffix),
+              "disjoint bridge merge produces the exact suffix hull", failures);
         // Exhaust every integer offset that can expose a profile vertex for
         // these inputs (each source value is in [-100, 100]).
         for (std::int64_t offset = -250; offset <= 250; ++offset) {

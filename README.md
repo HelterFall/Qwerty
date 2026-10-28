@@ -2,7 +2,7 @@
 
 An in-memory sequence engine with a C++ API and a stdin/stdout CLI for the command format in the specification.
 
-> **Status: correctness tests pass; one synthetic benchmark is below 1.5 seconds, but the full SLA is not proven.** The sequence is stored in an implicit treap of small blocks. Each block keeps convex hulls of prefix, suffix and best-subarray sums by length, allowing whole-block additions to use lazy tags. Range addition still visits all affected blocks, so this implementation does **not** provide strict (O(\\log M)) range updates.
+> **Status: correctness tests pass; one synthetic benchmark is below 1.5 seconds, but the full SLA is not proven.** The sequence is stored in an implicit treap of small blocks. Each block keeps convex profile hulls for prefixes, suffixes and best subarrays. Profiles are rebuilt by divide-and-conquer hull composition in O(B log B) time, while whole-block additions use lazy tags. Range addition still visits all affected blocks, so this implementation does **not** provide strict (O(\\log M)) range updates.
 
 ## Build and test
 
@@ -66,13 +66,13 @@ The implicit treap stores small blocks (up to 512 values per block by default). 
 - the base sum and element minimum/maximum for overflow validation;
 - upper hulls of prefix sums, suffix sums and best subarray sums indexed by length.
 
-Adding `delta` to every value in a block changes a candidate sum of length `k` by `delta * k`. The block's hull vertices stay in the same order under this shear, so a block's maximum prefix, suffix and non-empty subarray sum can be recomputed with logarithmic hull support queries. A partially covered block is materialized and rebuilt.
+Adding `delta` to every value in a block changes a candidate sum of length `k` by `delta * k`. The block's hull vertices stay in the same order under this shear, so a block's maximum prefix, suffix and non-empty subarray sum can be recomputed with logarithmic hull support queries. A partially covered block is materialized and rebuilt. Rebuilding recursively composes the profiles, including a Minkowski sum for subarrays crossing a split, rather than enumerating every O(B²) window.
 
 Let `B` be the maximum block size (currently 512), `M` the number of elements, and `K` the number of elements in an update range. Expected bounds are approximately:
-- insertion at an arbitrary position: \(O(\log(M/B) + B^2)\), because the affected block's subarray hull is rebuilt; appending to an unshifted block uses incremental per-length summaries and is \(O(\log(M/B) + B)\) amortized, excluding occasional block splits;
+- insertion at an arbitrary position: \(O(\log(M/B) + B\log B)\), because the affected block's profiles are rebuilt; appending to an unshifted block uses incremental per-length summaries and takes \(O(B)\), with occasional splits costing \(O(B\log B)\);
 - range query: \(O(B + \log(M/B)\log B)\);
 - range-add validation: \(O(\log(M/B) + B)\), using subtree minimum/maximum summaries to reject overflowing updates before mutation;
-- applying a range addition: \(O((K/B)\log B + B^2)\), because each affected block is visited and partial boundary blocks are rebuilt.
+- applying a range addition: \(O((K/B)\log B + B\log B)\), because each affected block is visited and partial boundary blocks are rebuilt.
 
 These bounds are a practical improvement over visiting every transaction in every update range, but range addition is still **not** strict logarithmic time. The randomized differential tests check correctness. CI compares block sizes 16, 32, 64, 128, 256, 512 and 1024 and runs larger 100,000-element mixed and full-range-update benchmarks. The 512-element default was selected from the target-sized comparison; on the smaller 20,000-element mixed workload, the 256-element blocks were faster. These tests do not prove compliance for an unspecified or different target workload.
 

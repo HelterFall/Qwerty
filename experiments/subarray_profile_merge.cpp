@@ -576,11 +576,66 @@ void test_linear_profile_size(int& failures) {
           "decreasing positive values retain a linear-size best hull", failures);
 }
 
+std::vector<Point> upper_hull_union(const std::vector<Point>& a,
+                                    const std::vector<Point>& b) {
+    std::vector<Point> candidates = a;
+    candidates.insert(candidates.end(), b.begin(), b.end());
+    std::sort(candidates.begin(), candidates.end(),
+        [](const Point& left, const Point& right) {
+            if (left.length != right.length) return left.length < right.length;
+            return left.sum > right.sum;
+        });
+    return upper_hull_sorted(std::move(candidates));
+}
+
+bool contains_point(const std::vector<Point>& hull, const Point& point) {
+    for (const Point& candidate : hull) {
+        if (candidate.length == point.length && candidate.sum == point.sum) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void test_overlapping_candidate_hulls_interleave(int& failures) {
+    // Both arrays are non-increasing, so their best-subarray profile at every
+    // length is their prefix sum. Nevertheless, the upper hull of the union
+    // alternates between the two source profiles at every length.
+    const std::vector<std::int64_t> left_values{
+        16, 15, 8, 8, 3, 1, -15, -16
+    };
+    const std::vector<std::int64_t> right_values{
+        20, 11, 9, 6, 5, -6, -6, -20
+    };
+    const Profile left = make_profile(left_values);
+    const Profile right = make_profile(right_values);
+    const std::vector<Point> envelope = upper_hull_union(left.best, right.best);
+
+    std::vector<char> sources;
+    for (const Point& point : envelope) {
+        const bool in_left = contains_point(left.best, point);
+        const bool in_right = contains_point(right.best, point);
+        check(in_left || in_right,
+              "every union-envelope vertex belongs to a source profile", failures);
+        if (in_left && in_right) continue;  // Identical tied vertex.
+        const char source = in_left ? 'L' : 'R';
+        if (sources.empty() || sources.back() != source) sources.push_back(source);
+    }
+
+    check(sources.size() >= 7U,
+          "overlapping candidate profiles require multiple source alternations",
+          failures);
+    std::cout << "Overlapping-hull fixture has " << envelope.size()
+              << " envelope vertices and " << (sources.empty() ? 0U : sources.size() - 1U)
+              << " source alternations.\n";
+}
+
 }  // namespace
 
 int main() {
     int failures = 0;
     test_randomized_composition(failures);
+    test_overlapping_candidate_hulls_interleave(failures);
     test_linear_profile_size(failures);
     if (failures != 0) {
         std::cerr << failures << " profile prototype test(s) failed\n";

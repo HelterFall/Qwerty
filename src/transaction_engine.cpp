@@ -11,7 +11,7 @@ namespace {
 
 constexpr WideInt kNegativeInfinity = -(static_cast<WideInt>(1) << 120);
 #ifndef TRANSACTION_ENGINE_BLOCK_SIZE
-#define TRANSACTION_ENGINE_BLOCK_SIZE 256
+#define TRANSACTION_ENGINE_BLOCK_SIZE 512
 #endif
 
 constexpr std::size_t kMaxBlockSize = TRANSACTION_ENGINE_BLOCK_SIZE;

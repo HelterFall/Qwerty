@@ -30,6 +30,12 @@ add_executable(prefix_sum_affine_model
 target_compile_options(prefix_sum_affine_model
     PRIVATE -Wall -Wextra -Wconversion)
 
+# Lazy affine tags for an implicit convex-chain representation.
+add_executable(affine_hull_lazy_prototype
+    experiments/affine_hull_lazy.cpp)
+target_compile_options(affine_hull_lazy_prototype
+    PRIVATE -Wall -Wextra -Wconversion)
+
 if(BUILD_TESTING)
     add_executable(transaction_engine_test tests/transaction_engine_test.cpp)
     target_link_libraries(transaction_engine_test PRIVATE transaction_engine)
@@ -39,6 +45,8 @@ if(BUILD_TESTING)
         COMMAND subarray_profile_merge_prototype)
     add_test(NAME prefix_sum_affine_model
         COMMAND prefix_sum_affine_model)
+    add_test(NAME affine_hull_lazy_prototype
+        COMMAND affine_hull_lazy_prototype)
 endif()
 
 # Compile multiple block-size variants so CI can compare speed and verify

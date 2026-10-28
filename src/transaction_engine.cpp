@@ -60,6 +60,11 @@ std::int64_t checked_value(WideInt value) {
 // For each length x, a hull stores the largest base sum y of that length.
 // Adding delta to every value transforms y into y + delta*x, a shear that
 // leaves the convex-hull vertex order unchanged. Support queries are O(log B).
+struct HullPoint {
+    std::uint16_t x = 0;
+    WideInt y = 0;
+};
+
 struct Hull {
     std::vector<std::uint16_t> x;
     std::vector<WideInt> y;
@@ -101,6 +106,20 @@ struct Hull {
     void reserve_points(std::size_t count) {
         x.reserve(count);
         y.reserve(count);
+    }
+
+
+    // Build a canonical hull from already sorted, sparse profile vertices.
+    void build_points(const std::vector<HullPoint>& points) {
+        x.clear();
+        y.clear();
+        y_offset = 0;
+        cache_valid = false;
+        cached_delta = 0;
+        cached_index = 0;
+        x.reserve(points.size());
+        y.reserve(points.size());
+        for (const HullPoint& point : points) append_point(point.x, point.y);
     }
 
     void build(const std::vector<WideInt>& sums_by_length) {
@@ -202,12 +221,197 @@ struct Hull {
     }
 };
 
+// A profile stores the upper hulls of best prefix, suffix and best-subarray
+// sums as functions of their lengths. Divide-and-conquer composition avoids the
+// O(B^2) enumeration of every window when a block is rebuilt.
+struct Profile {
+    std::size_t length = 0;
+    WideInt total = 0;
+    std::vector<HullPoint> prefix;
+    std::vector<HullPoint> suffix;
+    std::vector<HullPoint> best;
+};
+
+WideInt profile_cross(const HullPoint& a, const HullPoint& b,
+                      const HullPoint& c) noexcept {
+    const WideInt dx1 = static_cast<WideInt>(b.x) - a.x;
+    const WideInt dx2 = static_cast<WideInt>(c.x) - b.x;
+    return dx1 * (c.y - b.y) -
+           (static_cast<WideInt>(b.y) - a.y) * dx2;
+}
+
+std::vector<HullPoint> profile_upper_hull_sorted(
+    std::vector<HullPoint> points) {
+    std::vector<HullPoint> unique;
+    unique.reserve(points.size());
+    for (const HullPoint& point : points) {
+        if (!unique.empty() && unique.back().x == point.x) {
+            if (point.y > unique.back().y) unique.back() = point;
+        } else {
+            unique.push_back(point);
+        }
+    }
+
+    std::vector<HullPoint> hull;
+    hull.reserve(unique.size());
+    for (const HullPoint& point : unique) {
+        while (hull.size() >= 2U &&
+               profile_cross(hull[hull.size() - 2U], hull.back(), point) >= 0) {
+            hull.pop_back();
+        }
+        hull.push_back(point);
+    }
+    return hull;
+}
+
+std::vector<HullPoint> profile_minkowski_upper(
+    const std::vector<HullPoint>& a,
+    const std::vector<HullPoint>& b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+
+    std::vector<HullPoint> result;
+    result.reserve(a.size() + b.size());
+    result.push_back(HullPoint{
+        static_cast<std::uint16_t>(a.front().x + b.front().x),
+        a.front().y + b.front().y});
+
+    std::size_t i = 0U;
+    std::size_t j = 0U;
+    while (i + 1U < a.size() || j + 1U < b.size()) {
+        bool take_a = false;
+        if (j + 1U == b.size()) {
+            take_a = true;
+        } else if (i + 1U == a.size()) {
+            take_a = false;
+        } else {
+            const WideInt dx_a = static_cast<WideInt>(a[i + 1U].x) - a[i].x;
+            const WideInt dy_a = a[i + 1U].y - a[i].y;
+            const WideInt dx_b = static_cast<WideInt>(b[j + 1U].x) - b[j].x;
+            const WideInt dy_b = b[j + 1U].y - b[j].y;
+            take_a = dy_a * dx_b >= dy_b * dx_a;
+        }
+
+        WideInt dx = 0;
+        WideInt dy = 0;
+        if (take_a) {
+            dx = static_cast<WideInt>(a[i + 1U].x) - a[i].x;
+            dy = a[i + 1U].y - a[i].y;
+            ++i;
+        } else {
+            dx = static_cast<WideInt>(b[j + 1U].x) - b[j].x;
+            dy = b[j + 1U].y - b[j].y;
+            ++j;
+        }
+        result.push_back(HullPoint{
+            static_cast<std::uint16_t>(static_cast<WideInt>(result.back().x) + dx),
+            result.back().y + dy});
+    }
+    return profile_upper_hull_sorted(std::move(result));
+}
+
+std::vector<HullPoint> profile_merge_three_hulls(
+    const std::vector<HullPoint>& a,
+    const std::vector<HullPoint>& b,
+    const std::vector<HullPoint>& c) {
+    std::vector<HullPoint> candidates;
+    candidates.reserve(a.size() + b.size() + c.size());
+    std::size_t i = 0U;
+    std::size_t j = 0U;
+    std::size_t k = 0U;
+
+    while (i < a.size() || j < b.size() || k < c.size()) {
+        std::uint32_t next_x = std::numeric_limits<std::uint32_t>::max();
+        if (i < a.size()) next_x = std::min(next_x, static_cast<std::uint32_t>(a[i].x));
+        if (j < b.size()) next_x = std::min(next_x, static_cast<std::uint32_t>(b[j].x));
+        if (k < c.size()) next_x = std::min(next_x, static_cast<std::uint32_t>(c[k].x));
+
+        WideInt max_y = kNegativeInfinity;
+        if (i < a.size() && a[i].x == next_x) {
+            max_y = std::max(max_y, a[i].y);
+            ++i;
+        }
+        if (j < b.size() && b[j].x == next_x) {
+            max_y = std::max(max_y, b[j].y);
+            ++j;
+        }
+        if (k < c.size() && c[k].x == next_x) {
+            max_y = std::max(max_y, c[k].y);
+            ++k;
+        }
+        candidates.push_back(HullPoint{static_cast<std::uint16_t>(next_x), max_y});
+    }
+    return profile_upper_hull_sorted(std::move(candidates));
+}
+
+Profile profile_combine(const Profile& a, const Profile& b) {
+    if (a.length == 0U) return b;
+    if (b.length == 0U) return a;
+
+    Profile result;
+    result.length = a.length + b.length;
+    result.total = a.total + b.total;
+
+    std::vector<HullPoint> prefix_candidates;
+    prefix_candidates.reserve(a.prefix.size() + b.prefix.size());
+    prefix_candidates.insert(prefix_candidates.end(), a.prefix.begin(), a.prefix.end());
+    for (const HullPoint& point : b.prefix) {
+        prefix_candidates.push_back(HullPoint{
+            static_cast<std::uint16_t>(a.length + point.x),
+            a.total + point.y});
+    }
+    result.prefix = profile_upper_hull_sorted(std::move(prefix_candidates));
+
+    std::vector<HullPoint> suffix_candidates;
+    suffix_candidates.reserve(a.suffix.size() + b.suffix.size());
+    suffix_candidates.insert(suffix_candidates.end(), b.suffix.begin(), b.suffix.end());
+    for (const HullPoint& point : a.suffix) {
+        suffix_candidates.push_back(HullPoint{
+            static_cast<std::uint16_t>(b.length + point.x),
+            b.total + point.y});
+    }
+    result.suffix = profile_upper_hull_sorted(std::move(suffix_candidates));
+
+    const std::vector<HullPoint> crossing = profile_minkowski_upper(a.suffix, b.prefix);
+    std::vector<HullPoint> shifted_b_best;
+    shifted_b_best.reserve(b.best.size());
+    for (const HullPoint& point : b.best) {
+        shifted_b_best.push_back(HullPoint{
+            static_cast<std::uint16_t>(a.length + point.x), point.y});
+    }
+    result.best = profile_merge_three_hulls(a.best, shifted_b_best, crossing);
+    return result;
+}
+
+Profile build_profile_range(const std::vector<std::int64_t>& values,
+                            std::size_t begin, std::size_t end) {
+    if (begin == end) return Profile{};
+    if (end - begin == 1U) {
+        const WideInt value = static_cast<WideInt>(values[begin]);
+        const HullPoint point{1U, value};
+        Profile leaf;
+        leaf.length = 1U;
+        leaf.total = value;
+        leaf.prefix.push_back(point);
+        leaf.suffix.push_back(point);
+        leaf.best.push_back(point);
+        return leaf;
+    }
+    const std::size_t middle = begin + (end - begin) / 2U;
+    const Profile left = build_profile_range(values, begin, middle);
+    const Profile right = build_profile_range(values, middle, end);
+    return profile_combine(left, right);
+}
+
 struct Block {
     explicit Block(std::vector<std::int64_t> initial)
         : values(std::move(initial)) {
-        // stats() is used by noexcept treap pulls. Reserve the full block
-        // capacity now so lazy best-hull materialization never allocates.
+        // Treap pulls are allocation-free when the block is already valid.
+        // Hull vectors and the append scratch are reserved to the block limit.
+        prefix_hull.reserve_points(kMaxBlockSize);
+        suffix_hull.reserve_points(kMaxBlockSize);
         best_hull.reserve_points(kMaxBlockSize);
+        best_scratch.reserve(kMaxBlockSize);
         rebuild();
     }
 
@@ -217,15 +421,12 @@ struct Block {
     std::int64_t min_value = 0;
     std::int64_t max_value = 0;
     Hull prefix_hull;
-    Hull suffix_hull;
+    Hull suffix_hull;  // Coordinates are suffix lengths (not start indices).
     mutable Hull best_hull;
-    mutable bool best_hull_dirty = false;
     WideInt best_zero = kNegativeInfinity;
-    // Reuse scratch buffers across block rebuilds to avoid three heap
-    // allocations on every insertion/update of a block.
     std::vector<WideInt> prefix_sums;
     std::vector<WideInt> suffix_sums;
-    std::vector<WideInt> best_sums;
+    std::vector<HullPoint> best_scratch;
 
     std::size_t size() const noexcept { return values.size(); }
 
@@ -239,21 +440,9 @@ struct Block {
         result.length = values.size();
         result.sum = base_sum + lazy * static_cast<WideInt>(values.size());
         result.prefix = prefix_hull.max_plus(lazy);
-        result.suffix = suffix_hull.max_plus(-lazy) +
-                        lazy * static_cast<WideInt>(values.size() + 1U);
-        if (lazy == 0) {
-            result.best = best_zero;
-        } else {
-            ensure_best_hull();
-            result.best = best_hull.max_plus(lazy);
-        }
+        result.suffix = suffix_hull.max_plus(lazy);
+        result.best = (lazy == 0) ? best_zero : best_hull.max_plus(lazy);
         return result;
-    }
-
-    void ensure_best_hull() const {
-        if (!best_hull_dirty) return;
-        best_hull.build(best_sums);
-        best_hull_dirty = false;
     }
 
     std::int64_t min_actual() const noexcept {
@@ -280,12 +469,31 @@ struct Block {
         lazy = 0;
     }
 
+    void append_best_candidates() {
+        // The new best-by-length point set is the convex hull of the previous
+        // best hull vertices plus every suffix that ends at the appended item.
+        // Old non-hull points can never become exposed after adding more points.
+        best_scratch.clear();
+        std::size_t old_vertex = 0U;
+        const std::size_t new_size = values.size();
+        for (std::size_t length = 1U; length <= new_size; ++length) {
+            WideInt best = suffix_sums[length - 1U];
+            if (old_vertex < best_hull.x.size() &&
+                best_hull.x[old_vertex] == length) {
+                best = std::max(best, best_hull.y[old_vertex] + best_hull.y_offset);
+                ++old_vertex;
+            }
+            best_scratch.push_back(HullPoint{
+                static_cast<std::uint16_t>(length), best});
+        }
+        best_hull.build_points(best_scratch);
+        for (const WideInt suffix_sum : suffix_sums) {
+            best_zero = std::max(best_zero, suffix_sum);
+        }
+    }
+
     void insert(std::size_t position, std::int64_t value) {
-        // Appending is a common hot path while the initial sequence is built.
-        // When there is no lazy offset, all old windows remain valid; the only
-        // new candidate for each length is the suffix ending at the new value.
-        // Updating the three per-length summaries therefore takes O(B), not
-        // O(B^2). Middle insertions still rebuild the block from its values.
+        // Appending updates the prefix/suffix and best profiles in O(B).
         if (lazy == 0 && position == values.size()) {
             const std::size_t old_size = values.size();
             const WideInt v = static_cast<WideInt>(value);
@@ -295,31 +503,17 @@ struct Block {
             min_value = std::min(min_value, value);
             max_value = std::max(max_value, value);
             prefix_sums.push_back(base_sum);
-            prefix_hull.append_point(
-                static_cast<std::uint16_t>(old_size + 1U), base_sum);
+            prefix_hull.append_point(static_cast<std::uint16_t>(old_size + 1U), base_sum);
 
             suffix_sums.resize(old_size + 1U);
             for (std::size_t i = old_size; i > 0U; --i) {
                 suffix_sums[i] = suffix_sums[i - 1U] + v;
             }
             suffix_sums[0] = v;
-            suffix_hull.add_vertical(v);
-            suffix_hull.append_point(
-                static_cast<std::uint16_t>(old_size + 1U), v);
-
-            best_sums.resize(old_size + 1U);
-            for (std::size_t i = 0; i < old_size; ++i) {
-                if (suffix_sums[i] > best_sums[i]) {
-                    best_sums[i] = suffix_sums[i];
-                    best_zero = std::max(best_zero, best_sums[i]);
-                }
-            }
-            best_sums[old_size] = suffix_sums[old_size];
-            best_zero = std::max(best_zero, best_sums[old_size]);
-            // The exact zero-shift maximum is maintained incrementally.
-            // Build the full support hull only if a nonzero lazy shift later
-            // needs it; this avoids rebuilding one hull per append.
-            best_hull_dirty = true;
+            // This hull is indexed by suffix length, so appending shifts every
+            // old point's x-coordinate by one; rebuilding it is linear in B.
+            suffix_hull.build(suffix_sums);
+            append_best_candidates();
             return;
         }
 
@@ -345,19 +539,19 @@ struct Block {
             prefix_hull.build({});
             suffix_hull.build({});
             best_hull.build({});
-            best_hull_dirty = false;
+            prefix_sums.clear();
+            suffix_sums.clear();
+            best_scratch.clear();
             best_zero = kNegativeInfinity;
             lazy = 0;
             return;
         }
 
-        // Rebuild is called after materialization for every mutation.
         lazy = 0;
         min_value = max_value = values.front();
         base_sum = 0;
         prefix_sums.clear();
         suffix_sums.clear();
-        best_sums.assign(values.size(), kNegativeInfinity);
         prefix_sums.reserve(values.size());
         suffix_sums.reserve(values.size());
 
@@ -371,31 +565,21 @@ struct Block {
         }
 
         running = 0;
-        for (std::size_t length = 1; length <= values.size(); ++length) {
+        for (std::size_t length = 1U; length <= values.size(); ++length) {
             running += static_cast<WideInt>(values[values.size() - length]);
             suffix_sums.push_back(running);
         }
 
-        // Enumerate each contiguous window once, updating the best sum for
-        // its length. This halves the inner-loop work versus sliding once
-        // per target length.
-        for (std::size_t start = 0; start < values.size(); ++start) {
-            WideInt window = 0;
-            for (std::size_t end = start; end < values.size(); ++end) {
-                window += static_cast<WideInt>(values[end]);
-                const std::size_t length = end - start;
-                best_sums[length] = std::max(best_sums[length], window);
-            }
+        const Profile profile = build_profile_range(values, 0U, values.size());
+        prefix_hull.build_points(profile.prefix);
+        suffix_hull.build_points(profile.suffix);
+        best_hull.build_points(profile.best);
+        best_zero = kNegativeInfinity;
+        for (const HullPoint& point : profile.best) {
+            best_zero = std::max(best_zero, point.y);
         }
-
-        prefix_hull.build(prefix_sums);
-        suffix_hull.build_suffix(suffix_sums);
-        best_hull.build(best_sums);
-        best_hull_dirty = false;
-        best_zero = *std::max_element(best_sums.begin(), best_sums.end());
     }
 };
-
 }  // namespace
 
 struct TransactionEngine::Node {

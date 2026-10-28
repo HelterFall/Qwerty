@@ -125,6 +125,11 @@ struct Block {
     Hull prefix_hull;
     Hull suffix_hull;
     Hull best_hull;
+    // Reuse scratch buffers across block rebuilds to avoid three heap
+    // allocations on every insertion/update of a block.
+    std::vector<WideInt> prefix_sums;
+    std::vector<WideInt> suffix_sums;
+    std::vector<WideInt> best_sums;
 
     std::size_t size() const noexcept { return values.size(); }
 
@@ -190,12 +195,11 @@ struct Block {
         lazy = 0;
         min_value = max_value = values.front();
         base_sum = 0;
-        std::vector<WideInt> prefix_sums;
-        std::vector<WideInt> suffix_sums;
-        std::vector<WideInt> best_sums;
+        prefix_sums.clear();
+        suffix_sums.clear();
+        best_sums.assign(values.size(), kNegativeInfinity);
         prefix_sums.reserve(values.size());
         suffix_sums.reserve(values.size());
-        best_sums.reserve(values.size());
 
         WideInt running = 0;
         for (const std::int64_t value : values) {
@@ -212,18 +216,16 @@ struct Block {
             suffix_sums.push_back(running);
         }
 
-        for (std::size_t length = 1; length <= values.size(); ++length) {
+        // Enumerate each contiguous window once, updating the best sum for
+        // its length. This halves the inner-loop work versus sliding once
+        // per target length.
+        for (std::size_t start = 0; start < values.size(); ++start) {
             WideInt window = 0;
-            for (std::size_t i = 0; i < length; ++i) {
-                window += static_cast<WideInt>(values[i]);
+            for (std::size_t end = start; end < values.size(); ++end) {
+                window += static_cast<WideInt>(values[end]);
+                const std::size_t length = end - start;
+                best_sums[length] = std::max(best_sums[length], window);
             }
-            WideInt best = window;
-            for (std::size_t start = 1; start + length <= values.size(); ++start) {
-                window += static_cast<WideInt>(values[start + length - 1U]);
-                window -= static_cast<WideInt>(values[start - 1U]);
-                best = std::max(best, window);
-            }
-            best_sums.push_back(best);
         }
 
         prefix_hull.build(prefix_sums);

@@ -374,13 +374,9 @@ Profile profile_combine(const Profile& a, const Profile& b) {
     result.suffix = profile_upper_hull_sorted(std::move(suffix_candidates));
 
     const std::vector<HullPoint> crossing = profile_minkowski_upper(a.suffix, b.prefix);
-    std::vector<HullPoint> shifted_b_best;
-    shifted_b_best.reserve(b.best.size());
-    for (const HullPoint& point : b.best) {
-        shifted_b_best.push_back(HullPoint{
-            static_cast<std::uint16_t>(a.length + point.x), point.y});
-    }
-    result.best = profile_merge_three_hulls(a.best, shifted_b_best, crossing);
+    // A subarray entirely inside B keeps its own length; unlike prefixes,
+    // best-subarray candidates from B must not be shifted by a.length.
+    result.best = profile_merge_three_hulls(a.best, b.best, crossing);
     return result;
 }
 

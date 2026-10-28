@@ -309,8 +309,10 @@ struct Block {
 
             best_sums.resize(old_size + 1U);
             for (std::size_t i = 0; i < old_size; ++i) {
-                best_sums[i] = std::max(best_sums[i], suffix_sums[i]);
-                best_zero = std::max(best_zero, best_sums[i]);
+                if (suffix_sums[i] > best_sums[i]) {
+                    best_sums[i] = suffix_sums[i];
+                    best_zero = std::max(best_zero, best_sums[i]);
+                }
             }
             best_sums[old_size] = suffix_sums[old_size];
             best_zero = std::max(best_zero, best_sums[old_size]);

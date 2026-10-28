@@ -40,3 +40,5 @@ jobs:
         run: ./build/transaction_engine_benchmark_128 100000 20000
       - name: Larger workload benchmark (100k elements, block size 256)
         run: ./build/transaction_engine_benchmark 100000 20000
+      - name: Full-range updates only (100k elements, default block size)
+        run: ./build/transaction_engine_benchmark 100000 20000 full-update

@@ -36,6 +36,12 @@ add_executable(affine_hull_lazy_prototype
 target_compile_options(affine_hull_lazy_prototype
     PRIVATE -Wall -Wextra -Wconversion)
 
+# Implicit treap/rope for convex-chain vertices with lazy affine tags.
+add_executable(implicit_hull_treap_prototype
+    experiments/implicit_hull_treap.cpp)
+target_compile_options(implicit_hull_treap_prototype
+    PRIVATE -Wall -Wextra -Wconversion)
+
 if(BUILD_TESTING)
     add_executable(transaction_engine_test tests/transaction_engine_test.cpp)
     target_link_libraries(transaction_engine_test PRIVATE transaction_engine)
@@ -47,6 +53,8 @@ if(BUILD_TESTING)
         COMMAND prefix_sum_affine_model)
     add_test(NAME affine_hull_lazy_prototype
         COMMAND affine_hull_lazy_prototype)
+    add_test(NAME implicit_hull_treap_prototype
+        COMMAND implicit_hull_treap_prototype)
 endif()
 
 # Compile multiple block-size variants so CI can compare speed and verify

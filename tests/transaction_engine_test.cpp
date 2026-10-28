@@ -1,0 +1,167 @@
+#include "transaction_engine.hpp"
+
+#include <cstdint>
+#include <iostream>
+#include <limits>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+using transaction_engine::TransactionEngine;
+using transaction_engine::WideInt;
+
+namespace {
+int failures = 0;
+
+void check(bool condition, const std::string& description) {
+    if (!condition) {
+        ++failures;
+        std::cerr << "FAIL: " << description << '\n';
+    }
+}
+
+WideInt brute_max_subarray(const std::vector<std::int64_t>& values,
+                           std::size_t left, std::size_t right) {
+    WideInt best = -(static_cast<WideInt>(1) << 120);
+    for (std::size_t i = left; i <= right; ++i) {
+        WideInt sum = 0;
+        for (std::size_t j = i; j <= right; ++j) {
+            sum += static_cast<WideInt>(values[j]);
+            if (sum > best) best = sum;
+        }
+    }
+    return best;
+}
+
+template <typename Callable>
+void expect_out_of_range(const Callable& callable, const std::string& description) {
+    bool thrown = false;
+    try {
+        callable();
+    } catch (const std::out_of_range&) {
+        thrown = true;
+    }
+    check(thrown, description);
+}
+
+void test_examples() {
+    TransactionEngine engine;
+    engine.insert_transaction(0, 10);
+    engine.insert_transaction(1, -5);
+    engine.insert_transaction(2, 20);
+    engine.bulk_adjust_balance(0, 1, 5);
+    check(engine.get_max_profit_period(0, 2) == 35,
+          "provided CLI example returns 35 (not 30; see README)");
+
+    TransactionEngine second;
+    second.insert_transaction(0, 10);
+    second.insert_transaction(1, -5);
+    second.insert_transaction(2, 20);
+    second.insert_transaction(1, 99);
+    second.bulk_adjust_balance(1, 2, -10);
+    check(second.get_max_profit_period(0, 3) == 104,
+          "insert/update example returns 104 (not 124; see README)");
+    check(second.get_max_profit_period(2, 3) == 20,
+          "query chooses the non-empty best subarray");
+}
+
+void test_negative_and_boundaries() {
+    TransactionEngine engine;
+    engine.insert_transaction(0, -8);
+    engine.insert_transaction(1, -3);
+    engine.insert_transaction(2, -11);
+    check(engine.get_max_profit_period(0, 2) == -3,
+          "all-negative range returns its largest element");
+    check(engine.get_max_profit_period(0, 0) == -8, "single element query");
+    check(engine.size() == 3, "size reflects inserts");
+    expect_out_of_range([&] { engine.insert_transaction(4, 1); },
+                        "insert out-of-range is rejected");
+    expect_out_of_range([&] { engine.get_max_profit_period(1, 3); },
+                        "query out-of-range is rejected");
+    expect_out_of_range([&] { engine.bulk_adjust_balance(2, 1, 2); },
+                        "reversed update range is rejected");
+}
+
+void test_wide_aggregate_and_transactional_overflow() {
+    TransactionEngine engine;
+    constexpr std::int64_t max_value = std::numeric_limits<std::int64_t>::max();
+    engine.insert_transaction(0, max_value);
+    engine.insert_transaction(1, max_value);
+    engine.insert_transaction(2, max_value);
+    const WideInt expected = static_cast<WideInt>(max_value) * 3;
+    check(engine.get_max_profit_period(0, 2) == expected,
+          "aggregate sum does not overflow int64_t");
+
+    bool thrown = false;
+    try {
+        engine.bulk_adjust_balance(0, 0, 1);
+    } catch (const std::overflow_error&) {
+        thrown = true;
+    }
+    check(thrown, "element overflow is reported");
+    check(engine.get_max_profit_period(0, 2) == expected,
+          "overflowing update leaves the sequence unchanged");
+}
+
+void test_randomized_against_vector() {
+    TransactionEngine engine;
+    std::vector<std::int64_t> reference;
+    std::mt19937_64 random(0xC0FFEEULL);
+
+    for (int step = 0; step < 4000; ++step) {
+        const unsigned choice = static_cast<unsigned>(random() % 3U);
+        if (reference.empty() || (choice == 0U && reference.size() < 50U)) {
+            const std::size_t position = static_cast<std::size_t>(
+                random() % static_cast<std::uint64_t>(reference.size() + 1U));
+            const auto value = static_cast<std::int64_t>(random() % 2001U) - 1000;
+            reference.insert(reference.begin() + static_cast<std::ptrdiff_t>(position), value);
+            engine.insert_transaction(position, value);
+        } else if (choice == 1U) {
+            std::size_t left = static_cast<std::size_t>(random() % reference.size());
+            std::size_t right = static_cast<std::size_t>(random() % reference.size());
+            if (left > right) {
+                const std::size_t temp = left;
+                left = right;
+                right = temp;
+            }
+            const auto delta = static_cast<std::int64_t>(random() % 41U) - 20;
+            for (std::size_t i = left; i <= right; ++i) reference[i] += delta;
+            engine.bulk_adjust_balance(left, right, delta);
+        } else {
+            std::size_t left = static_cast<std::size_t>(random() % reference.size());
+            std::size_t right = static_cast<std::size_t>(random() % reference.size());
+            if (left > right) {
+                const std::size_t temp = left;
+                left = right;
+                right = temp;
+            }
+            check(engine.get_max_profit_period(left, right) ==
+                      brute_max_subarray(reference, left, right),
+                  "randomized operation agrees with brute-force reference");
+        }
+        check(engine.size() == reference.size(), "randomized size invariant");
+    }
+
+    if (!reference.empty()) {
+        check(engine.get_max_profit_period(0, reference.size() - 1U) ==
+                  brute_max_subarray(reference, 0, reference.size() - 1U),
+              "final randomized full-range query agrees with reference");
+    }
+}
+
+}  // namespace
+
+int main() {
+    test_examples();
+    test_negative_and_boundaries();
+    test_wide_aggregate_and_transactional_overflow();
+    test_randomized_against_vector();
+
+    if (failures != 0) {
+        std::cerr << failures << " test(s) failed\n";
+        return 1;
+    }
+    std::cout << "All TransactionEngine tests passed\n";
+    return 0;
+}

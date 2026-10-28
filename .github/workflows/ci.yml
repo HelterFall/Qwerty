@@ -1,0 +1,23 @@
+name: C++ CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          actual=$(printf '5\n1 0 10\n1 1 -5\n1 2 20\n2 0 1 5\n3 0 2\n' | ./build/transaction_engine_cli)
+          test "$actual" = "35"

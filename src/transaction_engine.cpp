@@ -63,6 +63,9 @@ std::int64_t checked_value(WideInt value) {
 struct Hull {
     std::vector<std::uint16_t> x;
     std::vector<WideInt> y;
+    mutable bool cache_valid = false;
+    mutable WideInt cached_delta = 0;
+    mutable std::size_t cached_index = 0;
 
     static WideInt cross(std::uint16_t ax, WideInt ay,
                          std::uint16_t bx, WideInt by,
@@ -75,6 +78,9 @@ struct Hull {
     void build(const std::vector<WideInt>& sums_by_length) {
         x.clear();
         y.clear();
+        cache_valid = false;
+        cached_delta = 0;
+        cached_index = 0;
         x.reserve(sums_by_length.size());
         y.reserve(sums_by_length.size());
 
@@ -102,18 +108,60 @@ struct Hull {
         const auto value_at = [&](std::size_t index) noexcept {
             return y[index] + delta * static_cast<WideInt>(x[index]);
         };
+        const auto binary_search = [&]() noexcept {
+            std::size_t low = 0;
+            std::size_t high = x.size() - 1U;
+            while (low < high) {
+                const std::size_t middle = low + (high - low) / 2U;
+                if (value_at(middle) <= value_at(middle + 1U)) {
+                    low = middle + 1U;
+                } else {
+                    high = middle;
+                }
+            }
+            return low;
+        };
 
-        std::size_t low = 0;
-        std::size_t high = x.size() - 1U;
-        while (low < high) {
-            const std::size_t middle = low + (high - low) / 2U;
-            if (value_at(middle) <= value_at(middle + 1U)) {
-                low = middle + 1U;
-            } else {
-                high = middle;
+        std::size_t best = 0;
+        if (!cache_valid || cached_index >= x.size()) {
+            best = binary_search();
+        } else if (delta == cached_delta) {
+            best = cached_index;
+        } else if (delta > cached_delta) {
+            // The support point moves only to the right as delta increases.
+            // Most small shifts move it a few places; cap the walk and fall
+            // back to binary search when it is not locally small.
+            best = cached_index;
+            std::size_t steps = 0;
+            while (best + 1U < x.size() &&
+                   value_at(best + 1U) >= value_at(best) && steps < 8U) {
+                ++best;
+                ++steps;
+            }
+            if (best + 1U < x.size() &&
+                value_at(best + 1U) >= value_at(best)) {
+                best = binary_search();
+            }
+        } else {
+            // For a decreasing delta the support point moves to the left.
+            // Strict comparison keeps the rightmost point on a tie, matching
+            // the binary-search path.
+            best = cached_index;
+            std::size_t steps = 0;
+            while (best > 0U && value_at(best - 1U) > value_at(best) &&
+                   steps < 8U) {
+                --best;
+                ++steps;
+            }
+            if (best > 0U && value_at(best - 1U) > value_at(best)) {
+                best = binary_search();
             }
         }
-        return value_at(low);
+
+        cache_valid = true;
+        cached_delta = delta;
+        cached_index = best;
+        return value_at(best);
     }
 };
 

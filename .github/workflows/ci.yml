@@ -26,12 +26,14 @@ jobs:
           actual=$(printf '5\n1 0 10\n1 1 -5\n1 2 20\n2 0 1 5\n3 0 2\n' | ./build/transaction_engine_cli)
           test "$actual" = "35"
       - name: Synthetic benchmark (block size 16)
-        run: ./build/transaction_engine_benchmark_16 20000 2000
+        run: ./build/transaction_engine_benchmark_16 20000 20000
       - name: Synthetic benchmark (block size 32)
-        run: ./build/transaction_engine_benchmark 20000 2000
+        run: ./build/transaction_engine_benchmark_32 20000 20000
       - name: Synthetic benchmark (block size 64)
-        run: ./build/transaction_engine_benchmark_64 20000 2000
+        run: ./build/transaction_engine_benchmark_64 20000 20000
       - name: Synthetic benchmark (block size 128)
-        run: ./build/transaction_engine_benchmark_128 20000 2000
+        run: ./build/transaction_engine_benchmark 20000 20000
       - name: Synthetic benchmark (block size 256)
-        run: ./build/transaction_engine_benchmark_256 20000 2000
+        run: ./build/transaction_engine_benchmark_256 20000 20000
+      - name: Larger workload benchmark (100k elements, default block size 128)
+        run: ./build/transaction_engine_benchmark 100000 20000

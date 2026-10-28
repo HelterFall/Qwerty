@@ -200,6 +200,46 @@ void test_cross_block_ranges_and_transactional_overflow() {
           "overflow rejection leaves the boundary element unchanged");
 }
 
+
+void test_large_multi_block_updates() {
+    TransactionEngine engine;
+    std::vector<std::int64_t> reference;
+    constexpr std::size_t count = 1300U;
+
+    // Cross the split threshold for both the 512- and 1024-element defaults.
+    // Other CI variants also exercise multiple blocks with this same workload.
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto value = static_cast<std::int64_t>((i * 37U) % 101U) - 50;
+        engine.insert_transaction(engine.size(), value);
+        reference.push_back(value);
+    }
+    check(engine.size() == count, "large append sequence has the expected size");
+    check(engine.get_max_profit_period(0U, count - 1U) ==
+              brute_max_subarray(reference, 0U, count - 1U),
+          "large multi-block initial query agrees with brute force");
+
+    engine.bulk_adjust_balance(17U, 1282U, 13);
+    for (std::size_t i = 17U; i <= 1282U; ++i) reference[i] += 13;
+    check(engine.get_max_profit_period(0U, count - 1U) ==
+              brute_max_subarray(reference, 0U, count - 1U),
+          "large cross-block update agrees with brute force");
+    check(engine.get_max_profit_period(200U, 1000U) ==
+              brute_max_subarray(reference, 200U, 1000U),
+          "large interior query agrees with brute force");
+
+    engine.bulk_adjust_balance(511U, 1025U, -29);
+    for (std::size_t i = 511U; i <= 1025U; ++i) reference[i] -= 29;
+    check(engine.get_max_profit_period(400U, 1100U) ==
+              brute_max_subarray(reference, 400U, 1100U),
+          "second cross-block update agrees with brute force");
+
+    engine.insert_transaction(512U, -777);
+    reference.insert(reference.begin() + 512, -777);
+    check(engine.get_max_profit_period(0U, reference.size() - 1U) ==
+              brute_max_subarray(reference, 0U, reference.size() - 1U),
+          "middle insertion after large lazy updates preserves block aggregates");
+}
+
 }  // namespace
 
 int main() {
@@ -207,6 +247,7 @@ int main() {
     test_negative_and_boundaries();
     test_wide_aggregate_and_transactional_overflow();
     test_cross_block_ranges_and_transactional_overflow();
+    test_large_multi_block_updates();
     test_randomized_against_vector();
 
     if (failures != 0) {

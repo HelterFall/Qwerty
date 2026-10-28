@@ -41,7 +41,6 @@ private:
     static Node* merge(Node* left, Node* right) noexcept;
     static void pull(Node* node) noexcept;
 
-    void validate_subtree_add(const Node* node, std::int64_t delta) const;
     void validate_add_range(const Node* node, std::size_t subtree_start,
                             std::size_t left, std::size_t right,
                             std::int64_t delta) const;

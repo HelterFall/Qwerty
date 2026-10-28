@@ -301,7 +301,9 @@ void test_randomized_composition(int& failures) {
         const Profile direct = make_profile(values);
         check(joined.length == direct.length, "joined profile length is exact", failures);
         check(joined.total == direct.total, "joined total is exact", failures);
-        for (const std::int64_t offset : {-100, -19, -1, 0, 1, 11, 100}) {
+        // Exhaust every integer offset that can expose a profile vertex for
+        // these inputs (each source value is in [-100, 100]).
+        for (std::int64_t offset = -250; offset <= 250; ++offset) {
             check(support(joined.prefix, offset) == support(direct.prefix, offset),
                   "joined prefix hull equals direct prefix hull", failures);
             check(support(joined.suffix, offset) == support(direct.suffix, offset),

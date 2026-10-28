@@ -39,6 +39,7 @@ private:
     static std::size_t node_size(const Node* node) noexcept;
     static void destroy(Node* node) noexcept;
     static Node* merge(Node* left, Node* right) noexcept;
+    static void pull_aggregate(Node* node) noexcept;
     static void pull(Node* node) noexcept;
 
     void validate_add_range(const Node* node, std::size_t subtree_start,

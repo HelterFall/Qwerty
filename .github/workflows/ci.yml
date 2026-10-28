@@ -33,3 +33,5 @@ jobs:
         run: ./build/transaction_engine_benchmark_64 20000 2000
       - name: Synthetic benchmark (block size 128)
         run: ./build/transaction_engine_benchmark_128 20000 2000
+      - name: Synthetic benchmark (block size 256)
+        run: ./build/transaction_engine_benchmark_256 20000 2000

@@ -81,11 +81,33 @@ std::vector<Point> merge_three_hulls(const std::vector<Point>& a,
     return upper_hull_sorted(std::move(candidates));
 }
 
+Wide line_value(const Point& point, std::int64_t offset) {
+    return point.sum + static_cast<Wide>(offset) * point.length;
+}
+
+// Upper-hull edge slopes are non-increasing. Therefore line_value is unimodal
+// along the chain, and its maximum can be found by binary search in O(log h).
 Wide support(const std::vector<Point>& hull, std::int64_t offset) {
+    if (hull.empty()) return kNegInf;
+    std::size_t low = 0;
+    std::size_t high = hull.size() - 1U;
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2U;
+        if (line_value(hull[middle], offset) <=
+            line_value(hull[middle + 1U], offset)) {
+            low = middle + 1U;
+        } else {
+            high = middle;
+        }
+    }
+    return line_value(hull[low], offset);
+}
+
+// Deliberately slow oracle used to validate binary-search support queries.
+Wide support_linear(const std::vector<Point>& hull, std::int64_t offset) {
     Wide answer = kNegInf;
     for (const Point& point : hull) {
-        answer = std::max(answer,
-            point.sum + static_cast<Wide>(offset) * point.length);
+        answer = std::max(answer, line_value(point, offset));
     }
     return answer;
 }
@@ -269,7 +291,16 @@ Wide brute_best(const std::vector<std::int64_t>& values,
 
 void test_profile(const std::vector<std::int64_t>& values, int& failures) {
     const Profile profile = make_profile(values);
-    for (const std::int64_t offset : {-100, -17, -1, 0, 1, 23, 100}) {
+    for (std::int64_t offset = -250; offset <= 250; ++offset) {
+        check(support(profile.prefix, offset) ==
+                  support_linear(profile.prefix, offset),
+              "binary prefix-hull search agrees with linear hull scan", failures);
+        check(support(profile.suffix, offset) ==
+                  support_linear(profile.suffix, offset),
+              "binary suffix-hull search agrees with linear hull scan", failures);
+        check(support(profile.best, offset) ==
+                  support_linear(profile.best, offset),
+              "binary best-hull search agrees with linear hull scan", failures);
         check(support(profile.prefix, offset) == brute_prefix(values, offset),
               "prefix profile support matches a direct scan", failures);
         check(support(profile.suffix, offset) == brute_suffix(values, offset),

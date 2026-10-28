@@ -27,7 +27,7 @@ endif()
 # Compile two extra block-size variants so CI can compare speed and verify
 # correctness without changing the default library's public API.
 if(TRANSACTION_ENGINE_BUILD_BENCHMARK)
-    foreach(BLOCK_SIZE IN ITEMS 16 32 64 128)
+    foreach(BLOCK_SIZE IN ITEMS 16 32 64 128 512 1024)
         add_library(transaction_engine_${BLOCK_SIZE} STATIC src/transaction_engine.cpp)
         target_include_directories(transaction_engine_${BLOCK_SIZE} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_compile_definitions(transaction_engine_${BLOCK_SIZE} PRIVATE

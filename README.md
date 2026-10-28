@@ -2,7 +2,7 @@
 
 An in-memory sequence engine with a C++ API and a stdin/stdout CLI for the command format in the specification.
 
-> **Status: correctness-focused, performance-improved MVP; not yet SLA-qualified.** The sequence is stored in an implicit treap of small blocks. Each block keeps convex hulls of prefix, suffix and best-subarray sums by length, allowing a whole-block range addition to be represented by a lazy tag. This avoids visiting every transaction in a long update, but an update still visits the affected blocks. This implementation therefore does **not** claim strict (O(\log M)) range updates or the 1.5-second acceptance target without a workload benchmark.
+> **Status: correctness tests pass; one synthetic benchmark is below 1.5 seconds, but the full SLA is not proven.** The sequence is stored in an implicit treap of small blocks. Each block keeps convex hulls of prefix, suffix and best-subarray sums by length, allowing whole-block additions to use lazy tags. Range addition still visits all affected blocks, so this implementation does **not** provide strict (O(\\log M)) range updates.
 
 ## Build and test
 

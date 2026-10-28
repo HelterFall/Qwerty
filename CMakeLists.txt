@@ -17,11 +17,20 @@ add_executable(transaction_engine_cli src/main.cpp)
 target_link_libraries(transaction_engine_cli PRIVATE transaction_engine)
 target_compile_options(transaction_engine_cli PRIVATE -Wall -Wextra -Wconversion)
 
+# Isolated research prototype for composing offset-aware subarray profiles.
+# This target is deliberately separate from the production TransactionEngine.
+add_executable(subarray_profile_merge_prototype
+    experiments/subarray_profile_merge.cpp)
+target_compile_options(subarray_profile_merge_prototype
+    PRIVATE -Wall -Wextra -Wconversion)
+
 if(BUILD_TESTING)
     add_executable(transaction_engine_test tests/transaction_engine_test.cpp)
     target_link_libraries(transaction_engine_test PRIVATE transaction_engine)
     target_compile_options(transaction_engine_test PRIVATE -Wall -Wextra -Wconversion)
     add_test(NAME transaction_engine_test COMMAND transaction_engine_test)
+    add_test(NAME subarray_profile_merge_prototype
+        COMMAND subarray_profile_merge_prototype)
 endif()
 
 # Compile multiple block-size variants so CI can compare speed and verify

@@ -421,7 +421,7 @@ struct Block {
     std::int64_t min_value = 0;
     std::int64_t max_value = 0;
     Hull prefix_hull;
-    Hull suffix_hull;  // Coordinates are suffix lengths (not start indices).
+    Hull suffix_hull;  // Coordinates are suffix start positions.
     mutable Hull best_hull;
     WideInt best_zero = kNegativeInfinity;
     std::vector<WideInt> prefix_sums;
@@ -440,7 +440,8 @@ struct Block {
         result.length = values.size();
         result.sum = base_sum + lazy * static_cast<WideInt>(values.size());
         result.prefix = prefix_hull.max_plus(lazy);
-        result.suffix = suffix_hull.max_plus(lazy);
+        result.suffix = suffix_hull.max_plus(-lazy) +
+                        lazy * static_cast<WideInt>(values.size() + 1U);
         result.best = (lazy == 0) ? best_zero : best_hull.max_plus(lazy);
         return result;
     }
@@ -510,9 +511,11 @@ struct Block {
                 suffix_sums[i] = suffix_sums[i - 1U] + v;
             }
             suffix_sums[0] = v;
-            // This hull is indexed by suffix length, so appending shifts every
-            // old point's x-coordinate by one; rebuilding it is linear in B.
-            suffix_hull.build(suffix_sums);
+            // Existing suffix sums rise vertically by the appended value;
+            // one new suffix starts at the final position.
+            suffix_hull.add_vertical(v);
+            suffix_hull.append_point(
+                static_cast<std::uint16_t>(old_size + 1U), v);
             append_best_candidates();
             return;
         }
@@ -572,7 +575,7 @@ struct Block {
 
         const Profile profile = build_profile_range(values, 0U, values.size());
         prefix_hull.build_points(profile.prefix);
-        suffix_hull.build_points(profile.suffix);
+        suffix_hull.build_suffix(suffix_sums);
         best_hull.build_points(profile.best);
         best_zero = kNegativeInfinity;
         for (const HullPoint& point : profile.best) {

@@ -36,6 +36,14 @@ jobs:
         run: ./build/transaction_engine_benchmark_128 20000 20000
       - name: Synthetic benchmark (block size 256)
         run: ./build/transaction_engine_benchmark 20000 20000
+      - name: Synthetic benchmark (block size 512)
+        run: ./build/transaction_engine_benchmark_512 20000 20000
+      - name: Synthetic benchmark (block size 1024)
+        run: ./build/transaction_engine_benchmark_1024 20000 20000
+      - name: Full-range updates only (block size 512)
+        run: ./build/transaction_engine_benchmark_512 100000 20000 full-update
+      - name: Full-range updates only (block size 1024)
+        run: ./build/transaction_engine_benchmark_1024 100000 20000 full-update
       - name: Larger workload benchmark (100k elements, block size 128)
         run: ./build/transaction_engine_benchmark_128 100000 20000
       - name: Larger workload benchmark (100k elements, block size 256)

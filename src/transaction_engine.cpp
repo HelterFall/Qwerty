@@ -66,6 +66,9 @@ struct Hull {
     mutable bool cache_valid = false;
     mutable WideInt cached_delta = 0;
     mutable std::size_t cached_index = 0;
+    // A uniform vertical shift does not change the hull geometry or support
+    // point. Keeping it separately makes suffix-hull appends O(1).
+    WideInt y_offset = 0;
 
     static WideInt cross(std::uint16_t ax, WideInt ay,
                          std::uint16_t bx, WideInt by,
@@ -75,9 +78,30 @@ struct Hull {
         return abx * (cy - by) - (by - ay) * bcx;
     }
 
+    void append_point(std::uint16_t new_x, WideInt actual_y) {
+        const WideInt new_y = actual_y - y_offset;
+        while (x.size() >= 2U) {
+            const std::size_t n = x.size();
+            if (cross(x[n - 2U], y[n - 2U], x[n - 1U], y[n - 1U],
+                      new_x, new_y) < 0) {
+                break;
+            }
+            x.pop_back();
+            y.pop_back();
+        }
+        x.push_back(new_x);
+        y.push_back(new_y);
+        cache_valid = false;
+    }
+
+    void add_vertical(WideInt amount) noexcept {
+        y_offset += amount;
+    }
+
     void build(const std::vector<WideInt>& sums_by_length) {
         x.clear();
         y.clear();
+        y_offset = 0;
         cache_valid = false;
         cached_delta = 0;
         cached_index = 0;
@@ -85,20 +109,27 @@ struct Hull {
         y.reserve(sums_by_length.size());
 
         for (std::size_t i = 0; i < sums_by_length.size(); ++i) {
-            const auto new_x = static_cast<std::uint16_t>(i + 1U);
-            const WideInt new_y = sums_by_length[i];
+            append_point(static_cast<std::uint16_t>(i + 1U), sums_by_length[i]);
+        }
+    }
 
-            while (x.size() >= 2U) {
-                const std::size_t n = x.size();
-                if (cross(x[n - 2U], y[n - 2U], x[n - 1U], y[n - 1U],
-                          new_x, new_y) < 0) {
-                    break;
-                }
-                x.pop_back();
-                y.pop_back();
-            }
-            x.push_back(new_x);
-            y.push_back(new_y);
+    // Suffix candidates are indexed by their start position, not their length.
+    // This makes appending a value translate all existing y coordinates and
+    // add a single rightmost point, without rebuilding the entire hull.
+    void build_suffix(const std::vector<WideInt>& sums_by_length) {
+        x.clear();
+        y.clear();
+        y_offset = 0;
+        cache_valid = false;
+        cached_delta = 0;
+        cached_index = 0;
+        x.reserve(sums_by_length.size());
+        y.reserve(sums_by_length.size());
+
+        const std::size_t count = sums_by_length.size();
+        for (std::size_t length = count; length > 0U; --length) {
+            append_point(static_cast<std::uint16_t>(count - length + 1U),
+                         sums_by_length[length - 1U]);
         }
     }
 
@@ -106,7 +137,8 @@ struct Hull {
         if (x.empty()) return kNegativeInfinity;
 
         const auto value_at = [&](std::size_t index) noexcept {
-            return y[index] + delta * static_cast<WideInt>(x[index]);
+            return y[index] + y_offset +
+                   delta * static_cast<WideInt>(x[index]);
         };
         const auto binary_search = [&]() noexcept {
             std::size_t low = 0;
@@ -197,7 +229,8 @@ struct Block {
         result.length = values.size();
         result.sum = base_sum + lazy * static_cast<WideInt>(values.size());
         result.prefix = prefix_hull.max_plus(lazy);
-        result.suffix = suffix_hull.max_plus(lazy);
+        result.suffix = suffix_hull.max_plus(-lazy) +
+                        lazy * static_cast<WideInt>(values.size() + 1U);
         result.best = best_hull.max_plus(lazy);
         return result;
     }
@@ -241,12 +274,17 @@ struct Block {
             min_value = std::min(min_value, value);
             max_value = std::max(max_value, value);
             prefix_sums.push_back(base_sum);
+            prefix_hull.append_point(
+                static_cast<std::uint16_t>(old_size + 1U), base_sum);
 
             suffix_sums.resize(old_size + 1U);
             for (std::size_t i = old_size; i > 0U; --i) {
                 suffix_sums[i] = suffix_sums[i - 1U] + v;
             }
             suffix_sums[0] = v;
+            suffix_hull.add_vertical(v);
+            suffix_hull.append_point(
+                static_cast<std::uint16_t>(old_size + 1U), v);
 
             best_sums.resize(old_size + 1U);
             for (std::size_t i = 0; i < old_size; ++i) {
@@ -254,8 +292,6 @@ struct Block {
             }
             best_sums[old_size] = suffix_sums[old_size];
 
-            prefix_hull.build(prefix_sums);
-            suffix_hull.build(suffix_sums);
             best_hull.build(best_sums);
             return;
         }
@@ -324,7 +360,7 @@ struct Block {
         }
 
         prefix_hull.build(prefix_sums);
-        suffix_hull.build(suffix_sums);
+        suffix_hull.build_suffix(suffix_sums);
         best_hull.build(best_sums);
     }
 };

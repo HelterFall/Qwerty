@@ -14,7 +14,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The GitHub Actions workflow builds the project, runs the randomized correctness suite at several block sizes, checks the sample CLI, and benchmarks several synthetic workloads. Those timings are comparative baselines only; they do not replace a benchmark using the exact target constraints.
+The GitHub Actions workflow builds the project, runs the randomized correctness suite at several block sizes, checks the sample CLI, and benchmarks several synthetic workloads. The current CI baseline for 100,000 append insertions followed by 20,000 mixed operations is about 3.74 seconds with the 128-element default block on the hosted runner. This is a synthetic comparison, not proof of the 1.5-second target.
 
 ## CLI
 
@@ -73,7 +73,7 @@ Let `B` be the maximum block size (currently 128), `M` the number of elements, a
 - range query: (O(B + \log(M/B)\log B));
 - range addition: (O((K/B)\log B + B^2)), plus the same order for validating the affected blocks before applying an update.
 
-These bounds are a practical improvement over visiting every element of every update range, but they are **not** strict logarithmic bounds. The randomized differential tests check correctness. CI also compares block sizes 16, 32, 64, 128 and 256 with a repeatable workload and runs a larger 100,000-element benchmark. These timings help tune constants, but do not prove the 1.5-second requirement for an unspecified or different workload.
+These bounds are a practical improvement over visiting every transaction in every update range, but range addition is still **not** strict logarithmic time. The randomized differential tests check correctness. CI compares block sizes 16, 32, 64, 128 and 256 with a repeatable workload and runs larger 100,000-element benchmarks. The 128-element default was fastest in the tested large mixed workload, but the measured total is still above 1.5 seconds. These tests do not prove compliance for an unspecified or different target workload.
 
 ## Tests
 

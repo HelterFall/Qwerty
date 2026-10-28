@@ -441,15 +441,20 @@ void TransactionEngine::destroy(Node* node) noexcept {
     delete node;
 }
 
-void TransactionEngine::pull(Node* node) noexcept {
+void TransactionEngine::pull_aggregate(Node* node) noexcept {
     if (node == nullptr) return;
 
     Stats result;
     if (node->left != nullptr) result = node->left->aggregate;
     result = combine(result, node->block_aggregate);
     if (node->right != nullptr) result = combine(result, node->right->aggregate);
-
     node->aggregate = result;
+}
+
+void TransactionEngine::pull(Node* node) noexcept {
+    if (node == nullptr) return;
+    pull_aggregate(node);
+
     node->subtree_min = node->block.min_actual();
     node->subtree_max = node->block.max_actual();
     if (node->left != nullptr) {
@@ -585,11 +590,19 @@ void TransactionEngine::validate_add_range(const Node* node,
 
 void TransactionEngine::apply_add_subtree(Node* node, std::int64_t delta) {
     if (node == nullptr) return;
+
+    // Every value in this subtree moves by the same delta, so its minimum and
+    // maximum shift directly and its length cannot change.
+    node->subtree_min = static_cast<std::int64_t>(
+        static_cast<WideInt>(node->subtree_min) + delta);
+    node->subtree_max = static_cast<std::int64_t>(
+        static_cast<WideInt>(node->subtree_max) + delta);
+
     node->block.lazy += static_cast<WideInt>(delta);
     node->block_aggregate = node->block.stats();
     apply_add_subtree(node->left, delta);
     apply_add_subtree(node->right, delta);
-    pull(node);
+    pull_aggregate(node);
 }
 
 void TransactionEngine::apply_add_range(Node* node,

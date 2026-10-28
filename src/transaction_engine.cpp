@@ -526,8 +526,8 @@ struct Block {
         return static_cast<std::int64_t>(static_cast<WideInt>(max_value) + lazy);
     }
 
-    void validate_full_add(std::int64_t delta) const {
-        const WideInt shift = lazy + static_cast<WideInt>(delta);
+    void validate_full_add(WideInt delta) const {
+        const WideInt shift = lazy + delta;
         if (!fits_int64(static_cast<WideInt>(min_value) + shift) ||
             !fits_int64(static_cast<WideInt>(max_value) + shift)) {
             throw std::overflow_error("transaction value would overflow int64_t");

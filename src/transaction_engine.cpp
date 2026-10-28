@@ -247,13 +247,15 @@ struct TransactionEngine::Node {
          std::uint64_t priority_value)
         : priority(priority_value),
           block(std::move(initial_values)),
-          aggregate(block.stats()),
+          block_aggregate(block.stats()),
+          aggregate(block_aggregate),
           subtree_length(block.size()) {}
 
     Node* left = nullptr;
     Node* right = nullptr;
     std::uint64_t priority;
     Block block;
+    Stats block_aggregate;
     Stats aggregate;
     std::size_t subtree_length;
 };
@@ -286,7 +288,7 @@ void TransactionEngine::pull(Node* node) noexcept {
 
     Stats result;
     if (node->left != nullptr) result = node->left->aggregate;
-    result = combine(result, node->block.stats());
+    result = combine(result, node->block_aggregate);
     if (node->right != nullptr) result = combine(result, node->right->aggregate);
 
     node->aggregate = result;
@@ -333,6 +335,7 @@ TransactionEngine::Node* TransactionEngine::insert_at(
 
     const std::size_t inside_position = position - left_count;
     root->block.insert(inside_position, value);
+    root->block_aggregate = root->block.stats();
     if (root->block.size() <= kMaxBlockSize) {
         pull(root);
         return root;
@@ -419,6 +422,7 @@ void TransactionEngine::validate_add_range(const Node* node,
 void TransactionEngine::apply_add_subtree(Node* node, std::int64_t delta) {
     if (node == nullptr) return;
     node->block.lazy += static_cast<WideInt>(delta);
+    node->block_aggregate = node->block.stats();
     apply_add_subtree(node->left, delta);
     apply_add_subtree(node->right, delta);
     pull(node);
@@ -454,6 +458,7 @@ void TransactionEngine::apply_add_range(Node* node,
         } else {
             node->block.add_partial(local_left, local_right, delta);
         }
+        node->block_aggregate = node->block.stats();
     }
 
     apply_add_range(node->right, block_end + 1U, left, right, delta);
@@ -505,7 +510,7 @@ WideInt TransactionEngine::get_max_profit_period(std::size_t left_index,
 
             if (local_left == 0U &&
                 local_right + 1U == node->block.size()) {
-                result = combine(result, node->block.stats());
+                result = combine(result, node->block_aggregate);
             } else {
                 for (std::size_t i = local_left; i <= local_right; ++i) {
                     result = combine(result,

@@ -155,17 +155,17 @@ void test_cross_block_ranges_and_transactional_overflow() {
     TransactionEngine engine;
     std::vector<std::int64_t> reference;
 
-    for (std::size_t i = 0; i < 100U; ++i) {
+    for (std::size_t i = 0; i < 257U; ++i) {
         const auto value = static_cast<std::int64_t>(i % 17U) - 8;
         engine.insert_transaction(i, value);
         reference.push_back(value);
     }
-    check(engine.get_max_profit_period(0, 99) ==
-              brute_max_subarray(reference, 0, 99),
+    check(engine.get_max_profit_period(0, 256) ==
+              brute_max_subarray(reference, 0, 256),
           "initial query spans several blocks");
 
-    engine.bulk_adjust_balance(7, 93, 11);
-    for (std::size_t i = 7; i <= 93; ++i) reference[i] += 11;
+    engine.bulk_adjust_balance(7, 250, 11);
+    for (std::size_t i = 7; i <= 250; ++i) reference[i] += 11;
     check(engine.get_max_profit_period(0, 99) ==
               brute_max_subarray(reference, 0, 99),
           "range update across block boundaries");

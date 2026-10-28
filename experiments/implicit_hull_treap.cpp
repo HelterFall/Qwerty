@@ -329,10 +329,30 @@ bool test_implicit_profile_joins() {
         Wide total_b = 0;
         for (auto value : b) total_b += value;
         apply(rs, 0, static_cast<Wide>(b.size()), total_b);
+        const auto suffix_bridge = find_disjoint_bridge(ls, rs);
         Tree joined_suffix = join_disjoint_upper_chains(std::move(ls), std::move(rs));
         const auto expected_suffix = upper_hull_sorted(suffix_points(values));
-        if (!equal(materialize(joined_suffix), expected_suffix)) {
-            std::cerr << "implicit suffix-profile join failed at trial " << trial << '\n';
+        const auto actual_suffix = materialize(joined_suffix);
+        if (!equal(actual_suffix, expected_suffix)) {
+            std::cerr << "implicit suffix-profile join failed at trial " << trial
+                      << " n=" << n << " cut=" << cut
+                      << " bridge=(" << suffix_bridge.first << ","
+                      << suffix_bridge.second << ")\nvalues:";
+            for (auto value : values) std::cerr << " " << value;
+            std::cerr << "\nleft suffix hull:";
+            for (const auto& p : left_suffix)
+                std::cerr << " (" << p.x << "," << static_cast<long long>(p.y) << ")";
+            std::cerr << "\nshifted right suffix hull:";
+            for (const auto& p : right_suffix)
+                std::cerr << " (" << p.x + static_cast<std::int64_t>(b.size()) << ","
+                          << static_cast<long long>(p.y + total_b) << ")";
+            std::cerr << "\nactual:";
+            for (const auto& p : actual_suffix)
+                std::cerr << " (" << p.x << "," << static_cast<long long>(p.y) << ")";
+            std::cerr << "\nexpected:";
+            for (const auto& p : expected_suffix)
+                std::cerr << " (" << p.x << "," << static_cast<long long>(p.y) << ")";
+            std::cerr << '\n';
             return false;
         }
 

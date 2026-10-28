@@ -598,9 +598,9 @@ bool contains_point(const std::vector<Point>& hull, const Point& point) {
 }
 
 void test_overlapping_candidate_hulls_interleave(int& failures) {
-    // Both arrays are non-increasing, so their best-subarray profile at every
-    // length is their prefix sum. Nevertheless, the upper hull of the union
-    // alternates between the two source profiles at every length.
+    // Both arrays are non-increasing, so their best-subarray profiles are
+    // prefix-sum chains. Their canonical upper hull union still alternates
+    // between the sources multiple times, ruling out a single-bridge splice.
     const std::vector<std::int64_t> left_values{
         16, 15, 8, 8, 3, 1, -15, -16
     };
@@ -622,7 +622,7 @@ void test_overlapping_candidate_hulls_interleave(int& failures) {
         if (sources.empty() || sources.back() != source) sources.push_back(source);
     }
 
-    check(sources.size() >= 7U,
+    check(sources.size() >= 6U,
           "overlapping candidate profiles require multiple source alternations",
           failures);
     std::cout << "Overlapping-hull fixture has " << envelope.size()

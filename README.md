@@ -69,9 +69,10 @@ The implicit treap stores small blocks (up to 128 values per block by default). 
 Adding `delta` to every value in a block changes a candidate sum of length `k` by `delta * k`. The block's hull vertices stay in the same order under this shear, so a block's maximum prefix, suffix and non-empty subarray sum can be recomputed with logarithmic hull support queries. A partially covered block is materialized and rebuilt.
 
 Let `B` be the maximum block size (currently 128), `M` the number of elements, and `K` the number of elements in an update range. Expected bounds are approximately:
-- insertion: (O(\log(M/B) + B^2)), because the affected block's subarray hull is rebuilt;
-- range query: (O(B + \log(M/B)\log B));
-- range addition: (O((K/B)\log B + B^2)), plus the same order for validating the affected blocks before applying an update.
+- insertion at an arbitrary position: \(O(\log(M/B) + B^2)\), because the affected block's subarray hull is rebuilt; appending to an unshifted block uses incremental per-length summaries and is \(O(\log(M/B) + B)\) amortized, excluding occasional block splits;
+- range query: \(O(B + \log(M/B)\log B)\);
+- range-add validation: \(O(\log(M/B) + B)\), using subtree minimum/maximum summaries to reject overflowing updates before mutation;
+- applying a range addition: \(O((K/B)\log B + B^2)\), because each affected block is visited and partial boundary blocks are rebuilt.
 
 These bounds are a practical improvement over visiting every transaction in every update range, but range addition is still **not** strict logarithmic time. The randomized differential tests check correctness. CI compares block sizes 16, 32, 64, 128 and 256 with a repeatable workload and runs larger 100,000-element benchmarks. The 128-element default was fastest in the tested large mixed workload, but the measured total is still above 1.5 seconds. These tests do not prove compliance for an unspecified or different target workload.
 

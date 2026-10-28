@@ -1,6 +1,7 @@
 #include "transaction_engine.hpp"
 
 #include <algorithm>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -490,7 +491,7 @@ struct Block {
                           << " delta=" << static_cast<long long>(delta)
                           << " actual=" << static_cast<long long>(best_hull.max_plus(delta))
                           << " expected=" << static_cast<long long>(oracle.max_plus(delta))
-                          << '\\n';
+                          << '\n';
                 return;
             }
         }

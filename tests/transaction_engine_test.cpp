@@ -111,7 +111,7 @@ void test_randomized_against_vector() {
 
     for (int step = 0; step < 4000; ++step) {
         const unsigned choice = static_cast<unsigned>(random() % 3U);
-        if (reference.empty() || (choice == 0U && reference.size() < 50U)) {
+        if (reference.empty() || (choice == 0U && reference.size() < 100U)) {
             const std::size_t position = static_cast<std::size_t>(
                 random() % static_cast<std::uint64_t>(reference.size() + 1U));
             const auto value = static_cast<std::int64_t>(random() % 2001U) - 1000;
@@ -150,12 +150,63 @@ void test_randomized_against_vector() {
     }
 }
 
+
+void test_cross_block_ranges_and_transactional_overflow() {
+    TransactionEngine engine;
+    std::vector<std::int64_t> reference;
+
+    for (std::size_t i = 0; i < 100U; ++i) {
+        const auto value = static_cast<std::int64_t>(i % 17U) - 8;
+        engine.insert_transaction(i, value);
+        reference.push_back(value);
+    }
+    check(engine.get_max_profit_period(0, 99) ==
+              brute_max_subarray(reference, 0, 99),
+          "initial query spans several blocks");
+
+    engine.bulk_adjust_balance(7, 93, 11);
+    for (std::size_t i = 7; i <= 93; ++i) reference[i] += 11;
+    check(engine.get_max_profit_period(0, 99) ==
+              brute_max_subarray(reference, 0, 99),
+          "range update across block boundaries");
+
+    engine.insert_transaction(32, -500);
+    reference.insert(reference.begin() + 32, -500);
+    engine.bulk_adjust_balance(20, 75, -3);
+    for (std::size_t i = 20; i <= 75; ++i) reference[i] -= 3;
+    check(engine.get_max_profit_period(16, 88) ==
+              brute_max_subarray(reference, 16, 88),
+          "insert after lazy block updates");
+
+    TransactionEngine overflow;
+    for (std::size_t i = 0; i < 100U; ++i) {
+        overflow.insert_transaction(i, 0);
+    }
+    overflow.bulk_adjust_balance(99, 99,
+        std::numeric_limits<std::int64_t>::max());
+
+    bool thrown = false;
+    try {
+        overflow.bulk_adjust_balance(
+            0, 99, 1);
+    } catch (const std::overflow_error&) {
+        thrown = true;
+    }
+    check(thrown, "overflow in a later block rejects a wide range update");
+    check(overflow.get_max_profit_period(0, 0) == 0,
+          "overflow rejection leaves earlier blocks unchanged");
+    check(overflow.get_max_profit_period(99, 99) ==
+              static_cast<WideInt>(std::numeric_limits<std::int64_t>::max()),
+          "overflow rejection leaves the boundary element unchanged");
+}
+
 }  // namespace
 
 int main() {
     test_examples();
     test_negative_and_boundaries();
     test_wide_aggregate_and_transactional_overflow();
+    test_cross_block_ranges_and_transactional_overflow();
     test_randomized_against_vector();
 
     if (failures != 0) {

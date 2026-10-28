@@ -98,6 +98,11 @@ struct Hull {
         y_offset += amount;
     }
 
+    void reserve_points(std::size_t count) {
+        x.reserve(count);
+        y.reserve(count);
+    }
+
     void build(const std::vector<WideInt>& sums_by_length) {
         x.clear();
         y.clear();
@@ -200,6 +205,9 @@ struct Hull {
 struct Block {
     explicit Block(std::vector<std::int64_t> initial)
         : values(std::move(initial)) {
+        // stats() is used by noexcept treap pulls. Reserve the full block
+        // capacity now so lazy best-hull materialization never allocates.
+        best_hull.reserve_points(kMaxBlockSize);
         rebuild();
     }
 

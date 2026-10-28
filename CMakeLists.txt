@@ -24,6 +24,12 @@ add_executable(subarray_profile_merge_prototype
 target_compile_options(subarray_profile_merge_prototype
     PRIVATE -Wall -Wextra -Wconversion)
 
+# Isolated model for the exact affine action on prefix-sum points.
+add_executable(prefix_sum_affine_model
+    experiments/prefix_sum_affine_model.cpp)
+target_compile_options(prefix_sum_affine_model
+    PRIVATE -Wall -Wextra -Wconversion)
+
 if(BUILD_TESTING)
     add_executable(transaction_engine_test tests/transaction_engine_test.cpp)
     target_link_libraries(transaction_engine_test PRIVATE transaction_engine)
@@ -31,6 +37,8 @@ if(BUILD_TESTING)
     add_test(NAME transaction_engine_test COMMAND transaction_engine_test)
     add_test(NAME subarray_profile_merge_prototype
         COMMAND subarray_profile_merge_prototype)
+    add_test(NAME prefix_sum_affine_model
+        COMMAND prefix_sum_affine_model)
 endif()
 
 # Compile multiple block-size variants so CI can compare speed and verify

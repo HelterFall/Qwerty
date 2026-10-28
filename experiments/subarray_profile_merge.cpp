@@ -112,6 +112,185 @@ Wide support_linear(const std::vector<Point>& hull, std::int64_t offset) {
     return answer;
 }
 
+struct Slope {
+    Wide dy = 0;
+    Wide dx = 1;  // Always positive.
+};
+
+int compare_slope(const Slope& a, const Slope& b) {
+    const Wide difference = a.dy * b.dx - b.dy * a.dx;
+    return (difference > 0) - (difference < 0);
+}
+
+Slope edge_slope(const std::vector<Point>& hull, std::size_t edge) {
+    return Slope{
+        hull[edge + 1U].sum - hull[edge].sum,
+        static_cast<Wide>(hull[edge + 1U].length) - hull[edge].length};
+}
+
+// Both edge lists are sorted by descending slope. Select their k-th combined
+// edge without materializing or sorting the union.
+Slope kth_slope_desc(const std::vector<Slope>& a,
+                     const std::vector<Slope>& b,
+                     std::size_t k) {
+    const std::vector<Slope>* first = &a;
+    const std::vector<Slope>* second = &b;
+    if (first->size() > second->size()) std::swap(first, second);
+
+    std::size_t low = k + 1U > second->size() ? k + 1U - second->size() : 0U;
+    std::size_t high = std::min(k + 1U, first->size());
+    while (low <= high) {
+        const std::size_t take_first = low + (high - low) / 2U;
+        const std::size_t take_second = k + 1U - take_first;
+
+        if (take_first > 0U && take_second < second->size() &&
+            compare_slope((*first)[take_first - 1U],
+                          (*second)[take_second]) < 0) {
+            high = take_first - 1U;
+            continue;
+        }
+        if (take_second > 0U && take_first < first->size() &&
+            compare_slope((*second)[take_second - 1U],
+                          (*first)[take_first]) < 0) {
+            low = take_first + 1U;
+            continue;
+        }
+
+        if (take_first == 0U) return (*second)[take_second - 1U];
+        if (take_second == 0U) return (*first)[take_first - 1U];
+        const Slope& last_first = (*first)[take_first - 1U];
+        const Slope& last_second = (*second)[take_second - 1U];
+        return compare_slope(last_first, last_second) < 0
+            ? last_first : last_second;
+    }
+    return Slope{};  // Unreachable for valid k.
+}
+
+Wide support_slope_scaled(const std::vector<Point>& hull,
+                          const Slope& slope,
+                          std::size_t* selected_index = nullptr) {
+    if (hull.empty()) {
+        if (selected_index != nullptr) *selected_index = 0U;
+        return kNegInf;
+    }
+    const auto value = [&](std::size_t i) {
+        return hull[i].sum * slope.dx -
+               slope.dy * static_cast<Wide>(hull[i].length);
+    };
+    std::size_t low = 0U;
+    std::size_t high = hull.size() - 1U;
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2U;
+        if (value(middle) <= value(middle + 1U)) {
+            low = middle + 1U;
+        } else {
+            high = middle;
+        }
+    }
+    if (selected_index != nullptr) *selected_index = low;
+    return value(low);
+}
+
+Wide bridge_gap(const std::vector<Point>& left,
+                const std::vector<Point>& right,
+                const Slope& slope) {
+    return support_slope_scaled(left, slope) -
+           support_slope_scaled(right, slope);
+}
+
+// Find the upper common tangent for two upper hulls whose x/length domains
+// are disjoint (left.back.x < right.front.x). The gap between their support
+// lines is strictly increasing with slope because every right x exceeds every
+// left x. Binary-search the combined, descending edge-slope sequence to find
+// the interval containing the unique bridge slope.
+std::pair<std::size_t, std::size_t> find_disjoint_upper_bridge(
+    const std::vector<Point>& left,
+    const std::vector<Point>& right) {
+    std::vector<Slope> left_edges;
+    std::vector<Slope> right_edges;
+    left_edges.reserve(left.size() > 0U ? left.size() - 1U : 0U);
+    right_edges.reserve(right.size() > 0U ? right.size() - 1U : 0U);
+    for (std::size_t i = 0; i + 1U < left.size(); ++i) {
+        left_edges.push_back(edge_slope(left, i));
+    }
+    for (std::size_t i = 0; i + 1U < right.size(); ++i) {
+        right_edges.push_back(edge_slope(right, i));
+    }
+
+    const std::size_t edge_count = left_edges.size() + right_edges.size();
+    if (edge_count == 0U) return {0U, 0U};
+
+    std::size_t low = 0U;
+    std::size_t high = edge_count;
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2U;
+        const Slope candidate = kth_slope_desc(left_edges, right_edges, middle);
+        const Wide gap = bridge_gap(left, right, candidate);
+        if (gap > 0) {
+            // The common tangent slope is smaller; continue to later edges.
+            low = middle + 1U;
+        } else {
+            high = middle;
+        }
+    }
+
+    Slope probe;
+    if (low == edge_count) {
+        probe = kth_slope_desc(left_edges, right_edges, edge_count - 1U);
+        probe.dy = probe.dy - probe.dx;  // Strictly below every edge slope.
+    } else {
+        const Slope current = kth_slope_desc(left_edges, right_edges, low);
+        if (bridge_gap(left, right, current) == 0) {
+            std::size_t left_index = 0U;
+            std::size_t right_index = 0U;
+            support_slope_scaled(left, current, &left_index);
+            support_slope_scaled(right, current, &right_index);
+            return {left_index, right_index};
+        }
+        if (low == 0U) {
+            probe = current;
+            probe.dy = probe.dy + probe.dx;  // Strictly above every edge slope.
+        } else {
+            const Slope previous =
+                kth_slope_desc(left_edges, right_edges, low - 1U);
+            probe = Slope{
+                previous.dy * current.dx + current.dy * previous.dx,
+                static_cast<Wide>(2) * previous.dx * current.dx};
+        }
+    }
+
+    std::size_t left_index = 0U;
+    std::size_t right_index = 0U;
+    support_slope_scaled(left, probe, &left_index);
+    support_slope_scaled(right, probe, &right_index);
+    return {left_index, right_index};
+}
+
+// Given two already-convex upper chains with disjoint x domains, their union's
+// upper hull is a prefix of the left chain and a suffix of the right chain.
+// This vector version validates bridge selection; a persistent rope is needed
+// to turn the slice/concatenate steps themselves into logarithmic-time work.
+std::vector<Point> merge_disjoint_upper_chains(
+    const std::vector<Point>& left,
+    const std::vector<Point>& right) {
+    if (left.empty()) return right;
+    if (right.empty()) return left;
+    if (left.back().length >= right.front().length) {
+        throw std::invalid_argument("upper chains must have disjoint ordered x domains");
+    }
+
+    const auto [left_bridge, right_bridge] =
+        find_disjoint_upper_bridge(left, right);
+    std::vector<Point> result;
+    result.reserve(left_bridge + 1U + right.size() - right_bridge);
+    result.insert(result.end(), left.begin(),
+                  left.begin() + static_cast<std::ptrdiff_t>(left_bridge + 1U));
+    result.insert(result.end(),
+                  right.begin() + static_cast<std::ptrdiff_t>(right_bridge),
+                  right.end());
+    return result;
+}
+
 // Minkowski sum of two upper chains. The upper-chain edge slopes are
 // non-increasing, so their edge lists can be merged in linear time.
 std::vector<Point> minkowski_upper(const std::vector<Point>& a,
@@ -224,23 +403,23 @@ Profile combine_profiles(const Profile& a, const Profile& b) {
     result.length = a.length + b.length;
     result.total = a.total + b.total;
 
-    std::vector<Point> prefix_candidates = a.prefix;
-    prefix_candidates.reserve(a.prefix.size() + b.prefix.size());
+    std::vector<Point> shifted_b_prefix;
+    shifted_b_prefix.reserve(b.prefix.size());
     for (const Point& point : b.prefix) {
-        prefix_candidates.push_back(Point{
+        shifted_b_prefix.push_back(Point{
             static_cast<std::int64_t>(a.length) + point.length,
             a.total + point.sum});
     }
-    result.prefix = upper_hull_sorted(std::move(prefix_candidates));
+    result.prefix = merge_disjoint_upper_chains(a.prefix, shifted_b_prefix);
 
-    std::vector<Point> suffix_candidates = b.suffix;
-    suffix_candidates.reserve(a.suffix.size() + b.suffix.size());
+    std::vector<Point> shifted_a_suffix;
+    shifted_a_suffix.reserve(a.suffix.size());
     for (const Point& point : a.suffix) {
-        suffix_candidates.push_back(Point{
+        shifted_a_suffix.push_back(Point{
             static_cast<std::int64_t>(b.length) + point.length,
             b.total + point.sum});
     }
-    result.suffix = upper_hull_sorted(std::move(suffix_candidates));
+    result.suffix = merge_disjoint_upper_chains(b.suffix, shifted_a_suffix);
 
     const std::vector<Point> crossing = minkowski_upper(a.suffix, b.prefix);
     result.best = merge_three_hulls(a.best, b.best, crossing);

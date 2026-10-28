@@ -599,50 +599,53 @@ bool contains_point(const std::vector<Point>& hull, const Point& point) {
 
 void test_overlapping_candidate_hulls_interleave(int& failures) {
     // Construct two strictly decreasing value sequences. For every length k,
-    // their best sum is the prefix sum. The difference of the two prefix sums
-    // is +2, -2, +4, -4, ...; hence the upper hull's winning source alternates
-    // at every length. The common slope term -3*i*i makes the winning points
-    // themselves strictly concave, so none of those alternating points is
-    // removed by the convex-hull normalization.
-    constexpr std::size_t count = 64U;
-    std::vector<std::int64_t> left_values;
-    std::vector<std::int64_t> right_values;
-    left_values.reserve(count);
-    right_values.reserve(count);
-    for (std::size_t i = 1U; i <= count; ++i) {
-        const std::int64_t index = static_cast<std::int64_t>(i);
-        const std::int64_t deviation = (i % 2U == 1U) ? index : -index;
-        const std::int64_t common = -3 * index * index;
-        left_values.push_back(common + deviation);
-        right_values.push_back(common - deviation);
+    // their best-subarray sum is the prefix sum. The difference between the
+    // two prefix sums is +2, -2, +4, -4, ...; hence the upper hull's winning
+    // source alternates at every length. The common term -3*i*i makes those
+    // winning points strictly concave, so every one survives hull reduction.
+    const std::size_t sizes[] = {32U, 64U, 128U, 256U};
+    for (const std::size_t count : sizes) {
+        std::vector<std::int64_t> left_values;
+        std::vector<std::int64_t> right_values;
+        left_values.reserve(count);
+        right_values.reserve(count);
+        for (std::size_t i = 1U; i <= count; ++i) {
+            const std::int64_t index = static_cast<std::int64_t>(i);
+            const std::int64_t deviation = (i % 2U == 1U) ? index : -index;
+            const std::int64_t common = -3 * index * index;
+            left_values.push_back(common + deviation);
+            right_values.push_back(common - deviation);
+        }
+
+        const Profile left = make_profile(left_values);
+        const Profile right = make_profile(right_values);
+        const std::vector<Point> envelope = upper_hull_union(left.best, right.best);
+
+        std::size_t alternations = 0U;
+        char previous_source = '\0';
+        for (const Point& point : envelope) {
+            const bool in_left = contains_point(left.best, point);
+            const bool in_right = contains_point(right.best, point);
+            check(in_left != in_right,
+                  "alternating fixture has a unique source at each winning vertex",
+                  failures);
+            const char source = in_left ? 'L' : 'R';
+            if (previous_source != '\0' && source != previous_source) ++alternations;
+            previous_source = source;
+        }
+
+        check(left.best.size() == count && right.best.size() == count,
+              "strictly decreasing inputs retain every best-profile vertex", failures);
+        check(envelope.size() == count,
+              "alternating envelope retains a winner for every length", failures);
+        check(alternations == count - 1U,
+              "overlapping candidate hulls alternate at every length", failures);
+        std::cout << "Overlapping-hull fixture n=" << count << " has "
+                  << envelope.size() << " vertices and " << alternations
+                  << " source alternations.\n";
     }
-
-    const Profile left = make_profile(left_values);
-    const Profile right = make_profile(right_values);
-    const std::vector<Point> envelope = upper_hull_union(left.best, right.best);
-
-    std::size_t alternations = 0U;
-    char previous_source = '\0';
-    for (const Point& point : envelope) {
-        const bool in_left = contains_point(left.best, point);
-        const bool in_right = contains_point(right.best, point);
-        check(in_left != in_right,
-              "alternating fixture has a unique source at each winning vertex", failures);
-        const char source = in_left ? 'L' : 'R';
-        if (previous_source != '\0' && source != previous_source) ++alternations;
-        previous_source = source;
-    }
-
-    check(left.best.size() == count && right.best.size() == count,
-          "strictly decreasing inputs retain every best-profile vertex", failures);
-    check(envelope.size() == count,
-          "alternating envelope retains a winner for every length", failures);
-    check(alternations == count - 1U,
-          "overlapping candidate hulls alternate at every length", failures);
-    std::cout << "Overlapping-hull fixture has " << envelope.size()
-              << " envelope vertices and " << alternations
-              << " source alternations.\n";
 }
+
 }  // namespace
 
 int main() {

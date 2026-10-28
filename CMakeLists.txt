@@ -24,7 +24,7 @@ if(BUILD_TESTING)
     add_test(NAME transaction_engine_test COMMAND transaction_engine_test)
 endif()
 
-# Compile two extra block-size variants so CI can compare speed and verify
+# Compile multiple block-size variants so CI can compare speed and verify
 # correctness without changing the default library's public API.
 if(TRANSACTION_ENGINE_BUILD_BENCHMARK)
     foreach(BLOCK_SIZE IN ITEMS 16 32 64 128 512 1024)

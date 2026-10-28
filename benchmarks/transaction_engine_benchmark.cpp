@@ -29,6 +29,7 @@ std::size_t parse_or_default(char* value, std::size_t fallback) {
 int main(int argc, char** argv) {
     const std::size_t count = argc > 1 ? parse_or_default(argv[1], 20000U) : 20000U;
     const std::size_t operations = argc > 2 ? parse_or_default(argv[2], 2000U) : 2000U;
+    const std::string mode = argc > 3 ? argv[3] : "mixed";
     if (count == 0U) {
         std::cerr << "element count must be positive\n";
         return 2;
@@ -51,7 +52,14 @@ int main(int argc, char** argv) {
         std::size_t right = static_cast<std::size_t>(random() % count);
         if (left > right) std::swap(left, right);
 
-        switch (i % 4U) {
+        if (mode == "full-update") {
+            engine.bulk_adjust_balance(0U, count - 1U,
+                static_cast<std::int64_t>(random() % 3U) - 1);
+        } else if (mode == "query-only") {
+            const auto answer = engine.get_max_profit_period(left, right);
+            checksum ^= static_cast<std::uint64_t>(answer) +
+                        static_cast<std::uint64_t>(i);
+        } else switch (i % 4U) {
         case 0U: {
             // Full-range update: stress the worst case for walking all blocks.
             engine.bulk_adjust_balance(0U, count - 1U,
@@ -77,7 +85,8 @@ int main(int argc, char** argv) {
     }
     const auto operations_end = Clock::now();
 
-    std::cout << "elements=" << count
+    std::cout << "mode=" << mode
+              << " elements=" << count
               << " operations=" << operations
               << " build_seconds=" << seconds(build_end - build_start)
               << " mixed_operations_seconds=" << seconds(operations_end - operations_start)

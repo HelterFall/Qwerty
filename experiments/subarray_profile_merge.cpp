@@ -289,7 +289,11 @@ std::vector<Point> merge_disjoint_upper_chains(
     result.insert(result.end(),
                   right.begin() + static_cast<std::ptrdiff_t>(right_bridge),
                   right.end());
-    return result;
+
+    // The bridge may land on a slope shared by two consecutive edges. In that
+    // case a tangent endpoint can be collinear with its neighbor. Normalize
+    // the joined chain to the same canonical representation as upper_hull_sorted.
+    return upper_hull_sorted(std::move(result));
 }
 
 // Minkowski sum of two upper chains. The upper-chain edge slopes are

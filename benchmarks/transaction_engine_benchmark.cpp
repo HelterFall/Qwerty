@@ -53,8 +53,11 @@ int main(int argc, char** argv) {
         if (left > right) std::swap(left, right);
 
         if (mode == "full-update") {
-            engine.bulk_adjust_balance(0U, count - 1U,
-                static_cast<std::int64_t>(random() % 3U) - 1);
+            // Every iteration is a real update; avoid zero-delta no-ops so
+            // this mode measures the expensive path rather than skipping it.
+            const std::int64_t delta =
+                (random() & 1U) == 0U ? -1 : 1;
+            engine.bulk_adjust_balance(0U, count - 1U, delta);
         } else if (mode == "query-only") {
             const auto answer = engine.get_max_profit_period(left, right);
             checksum ^= static_cast<std::uint64_t>(answer) +

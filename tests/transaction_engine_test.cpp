@@ -34,6 +34,18 @@ WideInt brute_max_subarray(const std::vector<std::int64_t>& values,
     return best;
 }
 
+WideInt linear_max_subarray(const std::vector<std::int64_t>& values,
+                            std::size_t left, std::size_t right) {
+    WideInt ending_here = static_cast<WideInt>(values[left]);
+    WideInt best = ending_here;
+    for (std::size_t i = left + 1U; i <= right; ++i) {
+        const WideInt value = static_cast<WideInt>(values[i]);
+        ending_here = std::max(value, ending_here + value);
+        best = std::max(best, ending_here);
+    }
+    return best;
+}
+
 template <typename Callable>
 void expect_out_of_range(const Callable& callable, const std::string& description) {
     bool thrown = false;
@@ -240,6 +252,54 @@ void test_large_multi_block_updates() {
           "middle insertion after large lazy updates preserves block aggregates");
 }
 
+
+void test_large_randomized_multiblock_stream() {
+    TransactionEngine engine;
+    std::vector<std::int64_t> reference;
+    std::mt19937_64 random(0xB10C5EEDULL);
+
+    for (std::size_t i = 0; i < 1300U; ++i) {
+        const auto value = static_cast<std::int64_t>(random() % 2001U) - 1000;
+        engine.insert_transaction(engine.size(), value);
+        reference.push_back(value);
+    }
+
+    std::size_t inserted = 0;
+    for (int step = 0; step < 600; ++step) {
+        const unsigned choice = static_cast<unsigned>(random() % 10U);
+        if (choice == 0U && inserted < 20U) {
+            const std::size_t position = static_cast<std::size_t>(
+                random() % static_cast<std::uint64_t>(reference.size() + 1U));
+            const auto value = static_cast<std::int64_t>(random() % 2001U) - 1000;
+            reference.insert(reference.begin() + static_cast<std::ptrdiff_t>(position),
+                             value);
+            engine.insert_transaction(position, value);
+            ++inserted;
+        } else if (choice < 6U) {
+            std::size_t left = static_cast<std::size_t>(random() % reference.size());
+            std::size_t right = static_cast<std::size_t>(random() % reference.size());
+            if (left > right) std::swap(left, right);
+            const auto delta = static_cast<std::int64_t>(random() % 51U) - 25;
+            engine.bulk_adjust_balance(left, right, delta);
+            for (std::size_t i = left; i <= right; ++i) reference[i] += delta;
+        } else {
+            std::size_t left = static_cast<std::size_t>(random() % reference.size());
+            std::size_t right = static_cast<std::size_t>(random() % reference.size());
+            if (left > right) std::swap(left, right);
+            check(engine.get_max_profit_period(left, right) ==
+                      linear_max_subarray(reference, left, right),
+                  "large randomized multi-block stream agrees with linear reference");
+        }
+
+        check(engine.size() == reference.size(),
+              "large randomized multi-block stream preserves size");
+    }
+
+    check(engine.get_max_profit_period(0U, reference.size() - 1U) ==
+              linear_max_subarray(reference, 0U, reference.size() - 1U),
+          "large randomized stream final full-range query agrees with reference");
+}
+
 }  // namespace
 
 int main() {
@@ -248,6 +308,7 @@ int main() {
     test_wide_aggregate_and_transactional_overflow();
     test_cross_block_ranges_and_transactional_overflow();
     test_large_multi_block_updates();
+    test_large_randomized_multiblock_stream();
     test_randomized_against_vector();
 
     if (failures != 0) {

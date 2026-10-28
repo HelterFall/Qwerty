@@ -169,5 +169,48 @@ bool run_test() {
               << n << " vertices; support matched brute force.\n";
     return true;
 }
+
+bool test_composed_affine_tags() {
+    std::mt19937_64 rng(0xA771F1EULL);
+    constexpr std::size_t n = 1023;
+    std::vector<Point> expected;
+    expected.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        expected.push_back(Point{static_cast<std::int64_t>(i),
+                                 -static_cast<Wide>(i) * static_cast<Wide>(i)});
+    }
+    Tree tree = build(expected, rng);
+    constexpr int operations = 1500;
+    for (int step = 0; step < operations; ++step) {
+        const Wide a = static_cast<std::int64_t>(rng() % 11U) - 5;
+        const Wide dx = static_cast<std::int64_t>(rng() % 3U) - 1;
+        const Wide dy = static_cast<std::int64_t>(rng() % 101U) - 50;
+        apply(tree, a, dx, dy);
+        for (auto& point : expected) {
+            const Wide old_x = static_cast<Wide>(point.x);
+            point.y += a * old_x + dy;
+            point.x = static_cast<std::int64_t>(old_x + dx);
+        }
+        if (!equal(materialize(tree), expected)) {
+            std::cerr << "composed lazy affine tags mismatch at step "
+                      << step << '\n';
+            return false;
+        }
+        if (step % 25 == 0) {
+            for (Wide slope : {-17, -3, 0, 8, 21}) {
+                if (support(tree, slope) != brute(expected, slope)) {
+                    std::cerr << "composed affine support mismatch at step "
+                              << step << '\n';
+                    return false;
+                }
+            }
+        }
+    }
+    std::cout << "Implicit hull treap passed " << operations
+              << " consecutive composed lazy-affine transforms on " << n
+              << " vertices.\\n";
+    return true;
+}
+
 } // namespace
-int main() { return run_test() ? 0 : 1; }
+int main() { return run_test() && test_composed_affine_tags() ? 0 : 1; }

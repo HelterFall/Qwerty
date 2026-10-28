@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -21,5 +25,9 @@ jobs:
         run: |
           actual=$(printf '5\n1 0 10\n1 1 -5\n1 2 20\n2 0 1 5\n3 0 2\n' | ./build/transaction_engine_cli)
           test "$actual" = "35"
-      - name: Synthetic benchmark
+      - name: Synthetic benchmark (block size 16)
+        run: ./build/transaction_engine_benchmark_16 20000 2000
+      - name: Synthetic benchmark (block size 32)
         run: ./build/transaction_engine_benchmark 20000 2000
+      - name: Synthetic benchmark (block size 64)
+        run: ./build/transaction_engine_benchmark_64 20000 2000

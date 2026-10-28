@@ -17,11 +17,44 @@ add_executable(transaction_engine_cli src/main.cpp)
 target_link_libraries(transaction_engine_cli PRIVATE transaction_engine)
 target_compile_options(transaction_engine_cli PRIVATE -Wall -Wextra -Wconversion)
 
+# Isolated research prototype for composing offset-aware subarray profiles.
+# This target is deliberately separate from the production TransactionEngine.
+add_executable(subarray_profile_merge_prototype
+    experiments/subarray_profile_merge.cpp)
+target_compile_options(subarray_profile_merge_prototype
+    PRIVATE -Wall -Wextra -Wconversion)
+
+# Isolated model for the exact affine action on prefix-sum points.
+add_executable(prefix_sum_affine_model
+    experiments/prefix_sum_affine_model.cpp)
+target_compile_options(prefix_sum_affine_model
+    PRIVATE -Wall -Wextra -Wconversion)
+
+# Lazy affine tags for an implicit convex-chain representation.
+add_executable(affine_hull_lazy_prototype
+    experiments/affine_hull_lazy.cpp)
+target_compile_options(affine_hull_lazy_prototype
+    PRIVATE -Wall -Wextra -Wconversion)
+
+# Implicit treap/rope for convex-chain vertices with lazy affine tags.
+add_executable(implicit_hull_treap_prototype
+    experiments/implicit_hull_treap.cpp)
+target_compile_options(implicit_hull_treap_prototype
+    PRIVATE -Wall -Wextra -Wconversion)
+
 if(BUILD_TESTING)
     add_executable(transaction_engine_test tests/transaction_engine_test.cpp)
     target_link_libraries(transaction_engine_test PRIVATE transaction_engine)
     target_compile_options(transaction_engine_test PRIVATE -Wall -Wextra -Wconversion)
     add_test(NAME transaction_engine_test COMMAND transaction_engine_test)
+    add_test(NAME subarray_profile_merge_prototype
+        COMMAND subarray_profile_merge_prototype)
+    add_test(NAME prefix_sum_affine_model
+        COMMAND prefix_sum_affine_model)
+    add_test(NAME affine_hull_lazy_prototype
+        COMMAND affine_hull_lazy_prototype)
+    add_test(NAME implicit_hull_treap_prototype
+        COMMAND implicit_hull_treap_prototype)
 endif()
 
 # Compile multiple block-size variants so CI can compare speed and verify

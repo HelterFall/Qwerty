@@ -442,6 +442,15 @@ bool same_hull(const std::vector<Point>& a, const std::vector<Point>& b) {
     return true;
 }
 
+void print_hull(const char* label, const std::vector<Point>& hull) {
+    std::cerr << label << ":";
+    for (const Point& point : hull) {
+        std::cerr << " (" << point.length << ","
+                  << static_cast<long long>(point.sum) << ")";
+    }
+    std::cerr << '\n';
+}
+
 Wide brute_prefix(const std::vector<std::int64_t>& values,
                   std::int64_t offset) {
     Wide sum = 0;
@@ -522,6 +531,14 @@ void test_randomized_composition(int& failures) {
         check(joined.total == direct.total, "joined total is exact", failures);
         check(same_hull(joined.prefix, direct.prefix),
               "disjoint bridge merge produces the exact prefix hull", failures);
+        if (!same_hull(joined.suffix, direct.suffix)) {
+            std::cerr << "suffix bridge mismatch trial=" << trial
+                      << " n=" << n << " split=" << split << " values:";
+            for (const auto value : values) std::cerr << ' ' << value;
+            std::cerr << '\n';
+            print_hull("joined suffix", joined.suffix);
+            print_hull("direct suffix", direct.suffix);
+        }
         check(same_hull(joined.suffix, direct.suffix),
               "disjoint bridge merge produces the exact suffix hull", failures);
         // Exhaust every integer offset that can expose a profile vertex for

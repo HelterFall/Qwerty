@@ -23,18 +23,17 @@ Wide cross(const Point& a, const Point& b, const Point& c) {
     return dx1 * (c.sum - b.sum) - (b.sum - a.sum) * dx2;
 }
 
-// Keeps candidates that can maximize sum + offset * length for some offset.
-std::vector<Point> upper_hull(std::vector<Point> points) {
-    std::sort(points.begin(), points.end(), [](const Point& a, const Point& b) {
-        if (a.length != b.length) return a.length < b.length;
-        return a.sum > b.sum;
-    });
-
+// Input is sorted by length. Duplicate lengths are coalesced by keeping
+// their largest sum, then the exposed upper chain is built in linear time.
+std::vector<Point> upper_hull_sorted(std::vector<Point> points) {
     std::vector<Point> unique;
     unique.reserve(points.size());
     for (const Point& point : points) {
-        if (!unique.empty() && unique.back().length == point.length) continue;
-        unique.push_back(point);  // Highest sum for this length comes first.
+        if (!unique.empty() && unique.back().length == point.length) {
+            if (point.sum > unique.back().sum) unique.back() = point;
+        } else {
+            unique.push_back(point);
+        }
     }
 
     std::vector<Point> hull;
@@ -47,6 +46,38 @@ std::vector<Point> upper_hull(std::vector<Point> points) {
         hull.push_back(point);
     }
     return hull;
+}
+
+std::vector<Point> merge_three_hulls(const std::vector<Point>& a,
+                                     const std::vector<Point>& b,
+                                     const std::vector<Point>& c) {
+    std::vector<Point> candidates;
+    candidates.reserve(a.size() + b.size() + c.size());
+    std::size_t i = 0;
+    std::size_t j = 0;
+    std::size_t k = 0;
+    while (i < a.size() || j < b.size() || k < c.size()) {
+        std::int64_t next_length = std::numeric_limits<std::int64_t>::max();
+        if (i < a.size()) next_length = std::min(next_length, a[i].length);
+        if (j < b.size()) next_length = std::min(next_length, b[j].length);
+        if (k < c.size()) next_length = std::min(next_length, c[k].length);
+
+        Wide max_sum = kNegInf;
+        if (i < a.size() && a[i].length == next_length) {
+            max_sum = std::max(max_sum, a[i].sum);
+            ++i;
+        }
+        if (j < b.size() && b[j].length == next_length) {
+            max_sum = std::max(max_sum, b[j].sum);
+            ++j;
+        }
+        if (k < c.size() && c[k].length == next_length) {
+            max_sum = std::max(max_sum, c[k].sum);
+            ++k;
+        }
+        candidates.push_back(Point{next_length, max_sum});
+    }
+    return upper_hull_sorted(std::move(candidates));
 }
 
 Wide support(const std::vector<Point>& hull, std::int64_t offset) {
@@ -101,7 +132,7 @@ std::vector<Point> minkowski_upper(const std::vector<Point>& a,
             static_cast<std::int64_t>(static_cast<Wide>(result.back().length) + dx),
             result.back().sum + dy});
     }
-    return upper_hull(std::move(result));
+    return upper_hull_sorted(std::move(result));
 }
 
 struct Profile {
@@ -152,9 +183,9 @@ Profile make_profile(const std::vector<std::int64_t>& values) {
                                     best_by_length[i]});
     }
 
-    profile.prefix = upper_hull(std::move(prefix_points));
-    profile.suffix = upper_hull(std::move(suffix_points));
-    profile.best = upper_hull(std::move(best_points));
+    profile.prefix = upper_hull_sorted(std::move(prefix_points));
+    profile.suffix = upper_hull_sorted(std::move(suffix_points));
+    profile.best = upper_hull_sorted(std::move(best_points));
     return profile;
 }
 
@@ -177,7 +208,7 @@ Profile combine_profiles(const Profile& a, const Profile& b) {
             static_cast<std::int64_t>(a.length) + point.length,
             a.total + point.sum});
     }
-    result.prefix = upper_hull(std::move(prefix_candidates));
+    result.prefix = upper_hull_sorted(std::move(prefix_candidates));
 
     std::vector<Point> suffix_candidates = b.suffix;
     suffix_candidates.reserve(a.suffix.size() + b.suffix.size());
@@ -186,13 +217,10 @@ Profile combine_profiles(const Profile& a, const Profile& b) {
             static_cast<std::int64_t>(b.length) + point.length,
             b.total + point.sum});
     }
-    result.suffix = upper_hull(std::move(suffix_candidates));
+    result.suffix = upper_hull_sorted(std::move(suffix_candidates));
 
-    std::vector<Point> best_candidates = a.best;
-    best_candidates.insert(best_candidates.end(), b.best.begin(), b.best.end());
     const std::vector<Point> crossing = minkowski_upper(a.suffix, b.prefix);
-    best_candidates.insert(best_candidates.end(), crossing.begin(), crossing.end());
-    result.best = upper_hull(std::move(best_candidates));
+    result.best = merge_three_hulls(a.best, b.best, crossing);
     return result;
 }
 

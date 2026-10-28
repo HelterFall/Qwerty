@@ -646,11 +646,73 @@ void test_overlapping_candidate_hulls_interleave(int& failures) {
     }
 }
 
+
+void test_degenerate_and_extreme_values(int& failures) {
+    const std::int64_t lo = std::numeric_limits<std::int64_t>::min();
+    const std::int64_t hi = std::numeric_limits<std::int64_t>::max();
+    const std::vector<std::vector<std::int64_t>> fixtures = {
+        {},
+        {0, 0, 0, 0, 0, 0},
+        {7, -7, 7, -7, 7, -7},
+        {hi, lo, 0, hi, lo},
+        {lo, lo, hi, hi, lo, hi},
+        {hi, hi, hi, lo, lo, lo, 0},
+        {lo, 1, lo, hi, -1, hi, 0}
+    };
+    const std::int64_t offsets[] = {
+        lo, lo + 1, -100, -1, 0, 1, 100, hi - 1, hi
+    };
+
+    for (std::size_t fixture_index = 0; fixture_index < fixtures.size();
+         ++fixture_index) {
+        const auto& values = fixtures[fixture_index];
+        const Profile direct = make_profile(values);
+        for (std::size_t split = 0; split <= values.size(); ++split) {
+            const std::vector<std::int64_t> left(
+                values.begin(),
+                values.begin() + static_cast<std::ptrdiff_t>(split));
+            const std::vector<std::int64_t> right(
+                values.begin() + static_cast<std::ptrdiff_t>(split),
+                values.end());
+            const Profile joined =
+                combine_profiles(make_profile(left), make_profile(right));
+
+            const std::string where =
+                "extreme/degenerate fixture " + std::to_string(fixture_index) +
+                ", split " + std::to_string(split);
+            check(joined.length == direct.length,
+                  where + ": joined length is exact", failures);
+            check(joined.total == direct.total,
+                  where + ": joined total is exact", failures);
+            check(same_hull(joined.prefix, direct.prefix),
+                  where + ": prefix hull matches direct construction", failures);
+            check(same_hull(joined.suffix, direct.suffix),
+                  where + ": suffix hull matches direct construction", failures);
+            check(same_hull(joined.best, direct.best),
+                  where + ": best hull matches direct construction", failures);
+
+            for (const std::int64_t offset : offsets) {
+                check(support(joined.prefix, offset) ==
+                          brute_prefix(values, offset),
+                      where + ": extreme-offset prefix support is exact", failures);
+                check(support(joined.suffix, offset) ==
+                          brute_suffix(values, offset),
+                      where + ": extreme-offset suffix support is exact", failures);
+                check(support(joined.best, offset) ==
+                          brute_best(values, offset),
+                      where + ": extreme-offset best support is exact", failures);
+            }
+        }
+    }
+    std::cout << "Degenerate/extreme-value profile tests passed across all splits.\\n";
+}
+
 }  // namespace
 
 int main() {
     int failures = 0;
     test_randomized_composition(failures);
+    test_degenerate_and_extreme_values(failures);
     test_overlapping_candidate_hulls_interleave(failures);
     test_linear_profile_size(failures);
     if (failures != 0) {

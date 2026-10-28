@@ -10,7 +10,13 @@ namespace transaction_engine {
 namespace {
 
 constexpr WideInt kNegativeInfinity = -(static_cast<WideInt>(1) << 120);
-constexpr std::size_t kMaxBlockSize = 32;
+#ifndef TRANSACTION_ENGINE_BLOCK_SIZE
+#define TRANSACTION_ENGINE_BLOCK_SIZE 32
+#endif
+
+constexpr std::size_t kMaxBlockSize = TRANSACTION_ENGINE_BLOCK_SIZE;
+static_assert(kMaxBlockSize >= 2U && kMaxBlockSize <= 65535U,
+              "block size must fit the uint16_t hull coordinate type");
 
 struct Stats {
     std::size_t length = 0;

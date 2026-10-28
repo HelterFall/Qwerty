@@ -14,7 +14,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The GitHub Actions workflow builds the project, runs unit tests and executes the sample CLI test on pushes and pull requests.
+The GitHub Actions workflow builds the project, runs the randomized correctness suite at several block sizes, checks the sample CLI, and benchmarks several synthetic workloads. Those timings are comparative baselines only; they do not replace a benchmark using the exact target constraints.
 
 ## CLI
 
@@ -61,19 +61,19 @@ Indices are zero-based and ranges are inclusive. Empty ranges are not accepted. 
 
 ## Data structure and complexity
 
-The implicit treap stores small blocks (up to 32 values per block). The treap maintains the total element count and the standard maximum-subarray summary for each subtree. Each block stores:
+The implicit treap stores small blocks (up to 128 values per block by default). The treap maintains the total element count and the standard maximum-subarray summary for each subtree. Each block stores:
 - the base values and a lazy uniform-add tag;
 - the base sum and element minimum/maximum for overflow validation;
 - upper hulls of prefix sums, suffix sums and best subarray sums indexed by length.
 
 Adding `delta` to every value in a block changes a candidate sum of length `k` by `delta * k`. The block's hull vertices stay in the same order under this shear, so a block's maximum prefix, suffix and non-empty subarray sum can be recomputed with logarithmic hull support queries. A partially covered block is materialized and rebuilt.
 
-Let `B` be the maximum block size (currently 32), `M` the number of elements, and `K` the number of elements in an update range. Expected bounds are approximately:
+Let `B` be the maximum block size (currently 128), `M` the number of elements, and `K` the number of elements in an update range. Expected bounds are approximately:
 - insertion: (O(\log(M/B) + B^2)), because the affected block's subarray hull is rebuilt;
 - range query: (O(B + \log(M/B)\log B));
 - range addition: (O((K/B)\log B + B^2)), plus the same order for validating the affected blocks before applying an update.
 
-These bounds are a practical improvement over visiting every element of every update range, but they are **not** strict logarithmic bounds. The randomized differential tests and CI are correctness checks, not a substitute for benchmarking the target input limits and 1.5-second requirement.
+These bounds are a practical improvement over visiting every element of every update range, but they are **not** strict logarithmic bounds. The randomized differential tests check correctness. CI also compares block sizes 16, 32, 64, 128 and 256 with a repeatable workload and runs a larger 100,000-element benchmark. These timings help tune constants, but do not prove the 1.5-second requirement for an unspecified or different workload.
 
 ## Tests
 

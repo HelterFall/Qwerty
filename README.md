@@ -14,7 +14,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The GitHub Actions workflow builds the project, runs the randomized correctness suite at several block sizes, checks the sample CLI, and benchmarks several synthetic workloads. The current CI baseline for 100,000 append insertions followed by 20,000 mixed operations is about 3.74 seconds with the 128-element default block on the hosted runner. This is a synthetic comparison, not proof of the 1.5-second target.
+The GitHub Actions workflow builds the project, runs the randomized correctness suite at several block sizes, checks the sample CLI, and benchmarks several synthetic workloads. The current CI baseline for 100,000 append insertions followed by 20,000 mixed operations is about 3.6–3.8 seconds with the 128-element default block on the hosted runner. This is a synthetic comparison, not proof of the 1.5-second target.
 
 ## CLI
 

@@ -44,9 +44,8 @@ private:
 
     void validate_add_range(const Node* node, std::size_t subtree_start,
                             std::size_t left, std::size_t right,
-                            std::int64_t delta, WideInt inherited_add) const;
-    static void apply_add_subtree(Node* node, WideInt delta) noexcept;
-    static void push_lazy(Node* node) noexcept;
+                            std::int64_t delta) const;
+    static void apply_add_subtree(Node* node, std::int64_t delta);
     void apply_add_range(Node* node, std::size_t subtree_start,
                          std::size_t left, std::size_t right,
                          std::int64_t delta);

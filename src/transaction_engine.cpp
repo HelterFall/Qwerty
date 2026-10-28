@@ -210,7 +210,9 @@ struct Block {
     std::int64_t max_value = 0;
     Hull prefix_hull;
     Hull suffix_hull;
-    Hull best_hull;
+    mutable Hull best_hull;
+    mutable bool best_hull_dirty = false;
+    WideInt best_zero = kNegativeInfinity;
     // Reuse scratch buffers across block rebuilds to avoid three heap
     // allocations on every insertion/update of a block.
     std::vector<WideInt> prefix_sums;
@@ -231,8 +233,19 @@ struct Block {
         result.prefix = prefix_hull.max_plus(lazy);
         result.suffix = suffix_hull.max_plus(-lazy) +
                         lazy * static_cast<WideInt>(values.size() + 1U);
-        result.best = best_hull.max_plus(lazy);
+        if (lazy == 0) {
+            result.best = best_zero;
+        } else {
+            ensure_best_hull();
+            result.best = best_hull.max_plus(lazy);
+        }
         return result;
+    }
+
+    void ensure_best_hull() const {
+        if (!best_hull_dirty) return;
+        best_hull.build(best_sums);
+        best_hull_dirty = false;
     }
 
     std::int64_t min_actual() const noexcept {
@@ -289,10 +302,14 @@ struct Block {
             best_sums.resize(old_size + 1U);
             for (std::size_t i = 0; i < old_size; ++i) {
                 best_sums[i] = std::max(best_sums[i], suffix_sums[i]);
+                best_zero = std::max(best_zero, best_sums[i]);
             }
             best_sums[old_size] = suffix_sums[old_size];
-
-            best_hull.build(best_sums);
+            best_zero = std::max(best_zero, best_sums[old_size]);
+            // The exact zero-shift maximum is maintained incrementally.
+            // Build the full support hull only if a nonzero lazy shift later
+            // needs it; this avoids rebuilding one hull per append.
+            best_hull_dirty = true;
             return;
         }
 
@@ -318,6 +335,8 @@ struct Block {
             prefix_hull.build({});
             suffix_hull.build({});
             best_hull.build({});
+            best_hull_dirty = false;
+            best_zero = kNegativeInfinity;
             lazy = 0;
             return;
         }
@@ -362,6 +381,8 @@ struct Block {
         prefix_hull.build(prefix_sums);
         suffix_hull.build_suffix(suffix_sums);
         best_hull.build(best_sums);
+        best_hull_dirty = false;
+        best_zero = *std::max_element(best_sums.begin(), best_sums.end());
     }
 };
 

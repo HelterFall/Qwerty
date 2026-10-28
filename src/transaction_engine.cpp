@@ -179,6 +179,39 @@ struct Block {
     }
 
     void insert(std::size_t position, std::int64_t value) {
+        // Appending is a common hot path while the initial sequence is built.
+        // When there is no lazy offset, all old windows remain valid; the only
+        // new candidate for each length is the suffix ending at the new value.
+        // Updating the three per-length summaries therefore takes O(B), not
+        // O(B^2). Middle insertions still rebuild the block from its values.
+        if (lazy == 0 && position == values.size()) {
+            const std::size_t old_size = values.size();
+            const WideInt v = static_cast<WideInt>(value);
+            values.push_back(value);
+
+            base_sum += v;
+            min_value = std::min(min_value, value);
+            max_value = std::max(max_value, value);
+            prefix_sums.push_back(base_sum);
+
+            suffix_sums.resize(old_size + 1U);
+            for (std::size_t i = old_size; i > 0U; --i) {
+                suffix_sums[i] = suffix_sums[i - 1U] + v;
+            }
+            suffix_sums[0] = v;
+
+            best_sums.resize(old_size + 1U);
+            for (std::size_t i = 0; i < old_size; ++i) {
+                best_sums[i] = std::max(best_sums[i], suffix_sums[i]);
+            }
+            best_sums[old_size] = suffix_sums[old_size];
+
+            prefix_hull.build(prefix_sums);
+            suffix_hull.build(suffix_sums);
+            best_hull.build(best_sums);
+            return;
+        }
+
         materialize_without_rebuild();
         values.insert(values.begin() + static_cast<std::ptrdiff_t>(position), value);
         rebuild();

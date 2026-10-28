@@ -14,7 +14,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The GitHub Actions workflow builds the project, runs the randomized correctness suite at seven block sizes, checks the sample CLI, and benchmarks mixed and update-heavy synthetic workloads. In the latest completed CI run, 100,000 append insertions followed by 20,000 mixed operations took about 0.81 seconds with the 256-element default block (about 0.42 s to build and 0.39 s for the operations). This is one synthetic workload; it does not guarantee the 1.5-second target for other operation mixes or the official hidden workload.
+The GitHub Actions workflow builds the project, runs the randomized correctness suite at seven block sizes, checks the sample CLI, and benchmarks mixed and update-heavy synthetic workloads. In a completed comparison run, 100,000 append insertions followed by 20,000 mixed operations took about 1.18 s with 256-element blocks, 0.88 s with 512-element blocks, and 1.38 s with 1024-element blocks. For 20,000 full-range updates on 100,000 elements, the update phase took about 1.17 s, 0.50 s, and 0.24 s respectively. Runner timings vary, and these synthetic results do not guarantee the 1.5-second target for other operation mixes or the official hidden workload; 512 is the new default based on the target-sized comparison.
 
 ## CLI
 
@@ -61,20 +61,20 @@ Indices are zero-based and ranges are inclusive. Empty ranges are not accepted. 
 
 ## Data structure and complexity
 
-The implicit treap stores small blocks (up to 256 values per block by default). The treap maintains the total element count and the standard maximum-subarray summary for each subtree. Each block stores:
+The implicit treap stores small blocks (up to 512 values per block by default). The treap maintains the total element count and the standard maximum-subarray summary for each subtree. Each block stores:
 - the base values and a lazy uniform-add tag;
 - the base sum and element minimum/maximum for overflow validation;
 - upper hulls of prefix sums, suffix sums and best subarray sums indexed by length.
 
 Adding `delta` to every value in a block changes a candidate sum of length `k` by `delta * k`. The block's hull vertices stay in the same order under this shear, so a block's maximum prefix, suffix and non-empty subarray sum can be recomputed with logarithmic hull support queries. A partially covered block is materialized and rebuilt.
 
-Let `B` be the maximum block size (currently 256), `M` the number of elements, and `K` the number of elements in an update range. Expected bounds are approximately:
+Let `B` be the maximum block size (currently 512), `M` the number of elements, and `K` the number of elements in an update range. Expected bounds are approximately:
 - insertion at an arbitrary position: \(O(\log(M/B) + B^2)\), because the affected block's subarray hull is rebuilt; appending to an unshifted block uses incremental per-length summaries and is \(O(\log(M/B) + B)\) amortized, excluding occasional block splits;
 - range query: \(O(B + \log(M/B)\log B)\);
 - range-add validation: \(O(\log(M/B) + B)\), using subtree minimum/maximum summaries to reject overflowing updates before mutation;
 - applying a range addition: \(O((K/B)\log B + B^2)\), because each affected block is visited and partial boundary blocks are rebuilt.
 
-These bounds are a practical improvement over visiting every transaction in every update range, but range addition is still **not** strict logarithmic time. The randomized differential tests check correctness. CI compares block sizes 16, 32, 64, 128, 256, 512 and 1024 and runs larger 100,000-element mixed and full-range-update benchmarks. In the latest stress run, 20,000 full-range updates took 0.81 s with 256-element blocks, 0.34 s with 512-element blocks and 0.16 s with 1024-element blocks; the larger blocks were slower on the 20,000-operation mixed workload, so 256 remains the balanced default. These tests do not prove compliance for an unspecified or different target workload.
+These bounds are a practical improvement over visiting every transaction in every update range, but range addition is still **not** strict logarithmic time. The randomized differential tests check correctness. CI compares block sizes 16, 32, 64, 128, 256, 512 and 1024 and runs larger 100,000-element mixed and full-range-update benchmarks. The 512-element default was selected from the target-sized comparison; on the smaller 20,000-element mixed workload, the 256-element blocks were faster. These tests do not prove compliance for an unspecified or different target workload.
 
 ## Tests
 

@@ -155,9 +155,12 @@ bool run_test() {
             point.x = static_cast<std::int64_t>(old_x + dx);
         }
         if (!check(p2.first, expected, step)) return false;
+        std::vector<Point> expected_full = original;
+        std::copy(expected.begin(), expected.end(),
+                  expected_full.begin() + static_cast<std::ptrdiff_t>(left));
         tree = merge(merge(std::move(p1.first), std::move(p2.first)), std::move(p2.second));
-        if (!equal(materialize(tree), original)) {
-            std::cerr << "split/merge changed untouched sequence at step " << step << '\n';
+        if (!equal(materialize(tree), expected_full)) {
+            std::cerr << "split/merge changed sequence coordinates/order at step " << step << '\n';
             return false;
         }
         tree = build(original, rng);
